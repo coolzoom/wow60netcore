@@ -135,7 +135,7 @@ install_sdk() {
     set +o pipefail
     yes | sdkmanager --licenses >/dev/null
     set -o pipefail
-    info "安装 platform-tools、$PLATFORM、build-tools $BUILD_TOOLS、cmake $CMAKE_VERSION"
+    info "安装 platform-tools、${PLATFORM}、build-tools ${BUILD_TOOLS}、cmake $CMAKE_VERSION"
     sdkmanager "platform-tools" "platforms;$PLATFORM" "build-tools;$BUILD_TOOLS" "cmake;$CMAKE_VERSION"
 }
 
@@ -157,7 +157,7 @@ install_ndk() {
 install_workload() {
     find_dotnet || true
     if [ -n "${DOTNET:-}" ] && has_android_workload; then
-        info ".NET android workload 已安装（$DOTNET）"
+        info ".NET android workload 已安装（${DOTNET}）"
         return
     fi
     local system_root=""
@@ -190,7 +190,7 @@ build_cimgui() {
     [ -x "$cmake" ] || die "cmake 未安装，请先执行 1 安装环境"
     if [ ! -f "$src/imgui/imgui.h" ]; then
         need git
-        info "获取 cimgui 源码（$CIMGUI_COMMIT）"
+        info "获取 cimgui 源码（${CIMGUI_COMMIT}）"
         rm -rf "$src" && mkdir -p "$src"
         git -C "$src" init -q
         git -C "$src" remote add origin https://github.com/cimgui/cimgui.git
@@ -298,7 +298,7 @@ select_device() {
 }
 
 start_emulator() {
-    info "没有已连接的设备，准备模拟器 $AVD_NAME（$SYSTEM_IMAGE）"
+    info "没有已连接的设备，准备模拟器 ${AVD_NAME}（${SYSTEM_IMAGE}）"
     sdkmanager "emulator" "$SYSTEM_IMAGE"
     export ANDROID_SDK_ROOT="$SDK" ANDROID_HOME="$SDK" ANDROID_AVD_HOME="$SDK/avd"
     mkdir -p "$ANDROID_AVD_HOME"
@@ -367,7 +367,7 @@ step_test() {
     push_data
 
     local mode="${TEST_MODE:-world}" seconds="${TEST_SECONDS:-45}"
-    info "启动应用（mode=$mode），等待 $seconds 秒"
+    info "启动应用（mode=${mode}），等待 $seconds 秒"
     adb shell am force-stop "$APP_ID"
     # 锁屏时 Activity 拿不到 Surface：先点亮屏幕并尝试解除锁屏（有密码时需手动解锁）
     adb shell input keyevent KEYCODE_WAKEUP || true
@@ -407,7 +407,7 @@ PROPS=()
 steps=(${@+"$@"})
 if [ ${#steps[@]} -eq 0 ]; then
     cat <<EOF
-安卓一键脚本（项目：$ROOT）
+安卓一键脚本（项目：${ROOT}）
   1) 安装环境  JDK、Android SDK、NDK、.NET android workload，并用 NDK 编译 cimgui
   2) 编译      桌面版 + 安卓 Debug
   3) 打包      Release APK -> dist/WoWNetCore.apk
