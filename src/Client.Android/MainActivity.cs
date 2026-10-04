@@ -2,7 +2,6 @@ using System.Numerics;
 using Android.App;
 using Android.Content.PM;
 using Engine;
-using Formats.Mpq;
 using Silk.NET.Windowing;
 using Silk.NET.Windowing.Sdl.Android;
 
@@ -25,14 +24,16 @@ public sealed class MainActivity : SilkActivity
     protected override void OnRun()
     {
         var root = GetExternalFilesDir(null)!.AbsolutePath;
-        string? data;
+        // Only the app's own directory: walking up (as on desktop) reaches other apps' storage, which is off limits.
+        string? data = Path.Combine(root, "Data");
         try
         {
-            data = MpqFileSystem.FindDataDirectory(root);
+            if (!Directory.Exists(data) || !Directory.EnumerateFiles(data, "*.MPQ").Any())
+                data = null;
         }
         catch (UnauthorizedAccessException e)
         {
-            Console.WriteLine($"Game data under {root} is not readable by the app ({e.Message}); files pushed as root need chown to the app's uid.");
+            Console.WriteLine($"{data} is not readable by the app ({e.Message}); files pushed as root need chown to the app's uid.");
             data = null;
         }
         var mode = Intent?.GetStringExtra("mode") ?? "world";
