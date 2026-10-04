@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NetCoreClient：TOC + XML + Lua 界面加载</title>
+<style>
+  :root { --fg:#1d1d1f; --muted:#6e6e73; --line:#e3e3e8; --accent:#9a6b00; --code:#f5f5f7; }
+  body { font: 15px/1.7 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; color: var(--fg); max-width: 980px; margin: 40px auto; padding: 0 24px; }
+  h1 { font-size: 28px; margin-bottom: 4px; }
+  h2 { font-size: 21px; margin-top: 40px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 17px; margin-top: 24px; }
+  .lead { color: var(--muted); margin-top: 0; }
+  .summary { background: #fff8e6; border: 1px solid #f0d9a0; border-radius: 8px; padding: 14px 18px; }
+  code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code); padding: 12px 16px; border-radius: 8px; overflow-x: auto; }
+  pre code { background: none; padding: 0; }
+  figure { margin: 18px 0; }
+  figure img { width: 100%; border: 1px solid var(--line); border-radius: 6px; }
+  figcaption { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
+  th { background: #fafafa; }
+  ol.flow li, ul li { margin: 4px 0; }
+  .note { color: var(--muted); font-size: 13px; }
+  .tag { display: inline-block; font-size: 12px; padding: 0 6px; border-radius: 4px; background: #eef3ff; color: #2b5bd7; margin-left: 4px; }
+</style>
+</head>
+<body>
+
+<h1>NetCoreClient：TOC + XML + Lua 界面加载</h1>
+<p class="lead">基于 Ghidra 对 WoW.exe 1.12.1（zhCN）的分析补全的界面加载功能，以及测试结果。</p>
+
+<div class="summary">
+  <strong>结论：</strong>NetCoreClient 现在能按 WoW.exe 的方式加载 TOC + XML + Lua 界面。新增的 <code>--glue</code> 模式可以显示真实的登录界面：加载真实 GlueXML（37 个文件、770 个框体）时 <strong>0 个 Lua 错误</strong>，整个解决方案编译通过，<strong>54 个测试全部通过</strong>（含原有的 32 个）。
+</div>
+
+<h2>效果截图</h2>
+<figure>
+  <img src="images/glue-login.png" alt="登录界面">
+  <figcaption>加 <code>--accept-eula</code> 时的登录屏。“服务器地址”框来自游戏目录下自定义的 <code>Interface\GlueXML\ServerAddress.xml</code>，内容取自 realmlist.wtf。</figcaption>
+</figure>
+<figure>
+  <img src="images/glue-eula.png" alt="EULA 页面">
+  <figcaption>首次运行（不加 <code>--accept-eula</code>）时先显示 EULA，正文读自 MPQ 中的 <code>Data\eula.html</code>，可以用滚轮和滚动条按钮翻页。</figcaption>
+</figure>
+
+<h3>运行方式</h3>
+<pre><code>dotnet run --project src/Client -- --glue [--accept-eula] [--no-loose] [--data &lt;Data 目录&gt;]</code></pre>
+<ul>
+  <li><code>--accept-eula</code>：视为已接受 EULA 和使用条款，直接进入登录屏。</li>
+  <li><code>--no-loose</code>：只读 MPQ，不叠加游戏目录下的散文件（与正版行为一致）。</li>
+  <li><code>--frames N --screenshot file.bmp</code>：渲染 N 帧后截图退出。</li>
+  <li>加载日志写在临时目录的 <code>NetCoreClient-GlueXML.log</code>。</li>
+</ul>
+
+<h2>从 Ghidra 分析出的加载流程</h2>
+
+<h3>启动顺序</h3>
+<table>
+  <tr><th>阶段</th><th>函数</th><th>步骤</th></tr>
+  <tr><td>Glue（登录界面）</td><td><code>FUN_0046a7b0</code></td>
+    <td>初始化 Lua（<code>FUN_00703b80</code>，内含 compat.lua）→ 注册 Glue API（<code>FUN_0046abb0</code>）→ 注册 26 个 Glue 事件（<code>FUN_0046cc60</code>）→ 签名校验（<code>GlueXML.toc.sig</code>，276 字节）→ 加载 TOC → 触发 <code>FRAMES_LOADED</code> → 切到 <code>"login"</code> 屏幕（<code>SET_GLUE_SCREEN</code>）</td></tr>
+  <tr><td>游戏内</td><td><code>FUN_0048fbf0</code></td>
+    <td>加载 <code>Interface\FrameXML\FrameXML.toc</code> → <code>Bindings.xml</code> → 各 AddOn（<code>FUN_0051f600</code> / <code>FUN_0051f240</code>）</td></tr>
+</table>
+
+<h3>TOC 解析（<code>FUN_006edb90</code>）</h3>
+<ul>
+  <li>跳过 UTF-8 BOM，按行拆分。</li>
+  <li><code>#</code> 开头的行不算文件；<code>## Key: Value</code> 是元数据（Interface、Title、Notes、Dependencies 等，见 <code>FUN_0051c9b0</code>）。</li>
+  <li>文件名去掉尾部空格，以 TOC 所在目录为相对路径。</li>
+</ul>
+
+<h3>单个文件（<code>FUN_006ede10</code>）</h3>
+<ul>
+  <li><code>.lua</code> 文件直接执行，失败时记录 “Error loading %s”。</li>
+  <li>XML 顶层元素分四类：
+    <ul>
+      <li><code>Include file=</code>：始终相对当前文件所在目录。</li>
+      <li><code>Script file=</code>：路径中不含 <code>\</code> 时才按相对路径处理；内联脚本的 chunk 名为 <code>文件名:&lt;Scripts&gt;</code>。</li>
+      <li><code>Font</code>：进入字体表，必须有名字。</li>
+      <li>其余：带 <code>virtual="true"</code> 的注册为模板，重名时先注册的生效（“Virtual object named %s already exists”）；否则创建框体。</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>创建框体（<code>FUN_006ee280</code> → <code>FUN_00769820</code> → <code>FUN_0076a2f0</code>）</h3>
+<ol class="flow">
+  <li>按标签名找框体类型，找不到时记录 “Unknown frame type: %s”。父框体取自 <code>parent</code> 属性或模板的 <code>parent</code>。</li>
+  <li>先套用 <code>inherits</code> 模板（递归 LoadXML）。</li>
+  <li>处理 Size/Anchors（<code>FUN_00767800</code>，支持 <code>$parent</code>）、各属性、Backdrop、HitRectInsets、Layers 和 Scripts。每个脚本单独编译为名为 “框体名:脚本名” 的 chunk。</li>
+  <li>创建 <code>&lt;Frames&gt;</code> 子框体（模板中的子框体在前）。子框体先运行 OnLoad，父框体后运行；父框体可见且尚未触发过 OnShow 时，再补一次 OnShow。</li>
+  <li>脚本运行时把全局 <code>this</code> 设为当前框体，运行完恢复原值（<code>FUN_00704d50</code>）。</li>
+</ol>
+
+<h3>区域（Texture / FontString）</h3>
+<ul>
+  <li>XML 中没有锚点的区域自动填满父框体（<code>FUN_007701c0</code>）。</li>
+  <li>贴图缺失时整块填绿色，并记录 “Texture %s: Unable to load texture file %s”。</li>
+  <li>FontString 的 <code>inherits</code> 先查字体对象、再查模板；<code>text</code> 属性优先查同名全局字符串（<code>FUN_00703bf0</code>）。</li>
+</ul>
+<p class="note">警告文案与客户端日志原文一致，例如 “Couldn't find inherited node”、“Couldn't find relative frame”、“Unknown frame type”。</p>
+
+<h2>补全的内容</h2>
+
+<h3>新增 <code>src/FrameXml</code> 库</h3>
+<table>
+  <tr><th>文件</th><th>作用</th></tr>
+  <tr><td><code>TocFile.cs</code>、<code>UiPath.cs</code></td><td>TOC 解析与路径规范化</td></tr>
+  <tr><td><code>UiLoader.cs</code></td><td>TOC / XML / Lua 加载，框体与区域创建，尺寸、内边距、颜色、Backdrop、字体解析</td></tr>
+  <tr><td><code>UiScreen.cs</code></td><td>具名对象表、模板、字体、事件分发（<code>event</code>/<code>arg1..9</code>）、布局、绘制顺序、鼠标与键盘输入、Glue 和 FrameXML 启动流程</td></tr>
+  <tr><td><code>Objects/*.cs</code></td><td>约 20 种控件：Frame、Button、CheckButton、EditBox、Slider、StatusBar、ScrollFrame、SimpleHTML、MessageFrame、Model 系列、GameTooltip 等</td></tr>
+  <tr><td><code>Lua/LuaEngine.cs</code>、<code>Lua/Lua50Compat.cs</code></td><td>Lua 运行环境与 5.0 兼容层</td></tr>
+  <tr><td><code>Lua/LuaBindings.cs</code></td><td>Lua 侧每种对象的方法表（布尔值按 1.12 约定返回 <code>1</code>/<code>nil</code>）</td></tr>
+  <tr><td><code>GlueApi.cs</code>、<code>CoreApi.cs</code></td><td>Glue 屏幕调用的约 120 个 C 函数，以及 <code>CreateFrame</code> 等通用函数；CVar 从 realmlist.wtf 和 WTF\Config.wtf 读取</td></tr>
+  <tr><td><code>AddOns.cs</code></td><td>AddOn 发现、依赖加载、版本检查</td></tr>
+  <tr><td><code>TextMarkup.cs</code></td><td><code>|cAARRGGBB</code> 颜色码、<code>|r</code>、超链接等转义</td></tr>
+</table>
+
+<h3>Lua 5.0 兼容</h3>
+<p>引擎使用 MoonSharp（Lua 5.2）。加载前做一层词法转换，并补上 compat.lua 里的全局函数：</p>
+<ul>
+  <li><code>for k,v in 表 do</code> 自动包装成迭代器。</li>
+  <li>变参函数补上隐式 <code>arg</code> 表（含 <code>arg.n</code>）。</li>
+  <li>把作为普通标识符使用的 <code>goto</code> 改名。</li>
+  <li>5.0 能接受的 <code>\%</code>、<code>\[</code> 等转义去掉反斜杠。</li>
+  <li>全局函数：<code>getn</code>、<code>tinsert</code>、<code>mod</code>、<code>strupper</code>、角度制 <code>sin</code>/<code>cos</code>、<code>getglobal</code> 等。</li>
+</ul>
+<p>转换不增加换行，报错行号与原文件一致。</p>
+
+<h3>客户端渲染</h3>
+<ul>
+  <li><code>src/Client/GlueGame.cs</code>：<code>--glue</code> 模式，负责加载界面，并把鼠标、滚轮和键盘事件转发给 UI。</li>
+  <li><code>src/Client/Ui/GlueRenderer.cs</code>：通过 ImGui 绘制 Backdrop（平铺背景加八段边框）、贴图（含纹理坐标和 ADD 混合近似）、文字（颜色码、阴影、描边、自动换行）、编辑框光标，以及滚动区域裁剪。字体使用 MPQ 中的方正字体，字形集合由界面实际用到的字符生成。</li>
+</ul>
+
+<h2>测试</h2>
+<p>全部位于 <code>tests/Engine.Tests/FrameXmlTests.cs</code>，结果：<strong>54 / 54 通过</strong>。</p>
+<table>
+  <tr><th>类别</th><th>覆盖内容</th></tr>
+  <tr><td>单元测试</td><td>TOC 与路径解析、颜色码、Lua 5.0 兼容（迭代、<code>arg</code>、<code>goto</code>、转义、错误行号与 <code>seterrorhandler</code>）、Include/Script 相对路径、模板继承与 <code>$parent</code>、OnLoad 顺序、锚点计算、警告文案、事件、点击与输入、Lua 中的 <code>CreateFrame</code></td></tr>
+  <tr><td>真实数据 <span class="tag">需要 Data/*.MPQ</span></td><td>
+    <ul>
+      <li>GlueXML 无 Lua 错误，登录屏可见，账号框获得焦点。</li>
+      <li>读入本地的服务器地址框，修改后写回 <code>realmList</code>。</li>
+      <li>点击登录按钮弹出状态对话框。</li>
+      <li>完整走通 EULA 和 TOS：滚到底部、接受、进入登录屏。</li>
+      <li>FrameXML 整体加载完成，<code>UIParent</code> 已创建。</li>
+    </ul>
+  </td></tr>
+</table>
+
+<h2>需要注意的几点</h2>
+<ul>
+  <li><strong>游戏内 FrameXML 还剩 281 个 Lua 错误。</strong>都是缺少 <code>UnitName</code>、<code>GetItemQualityColor</code> 这类依赖游戏状态的 C 函数，界面结构本身完整。需要等网络和世界状态接入后再补。</li>
+  <li><strong>散文件优先是有意为之。</strong>正版 exe 启动时会把散放的 <code>Interface\GlueXML</code> 改名为 <code>.old</code>（<code>FUN_0051fb50</code>），签名校验（<code>FUN_006f10f0</code>）也会拒绝修改过的 GlueXML。这里保留散文件优先、跳过签名校验，<code>ServerAddress.xml</code> 才能生效。要与正版完全一致，请使用 <code>--no-loose</code>。</li>
+  <li><strong>尚未实现：</strong>
+    <ul>
+      <li>登录背景的 3D 模型（ModelFFX）不渲染，背景为黑色。</li>
+      <li>登录按钮目前只弹出“正在连接”，还没有真正联网。</li>
+      <li>滚动条滑块不能拖动；滚轮和上下按钮可用。</li>
+    </ul>
+  </li>
+  <li><strong>两处是推断，而非直接从反编译读出：</strong>
+    <ul>
+      <li>显示框体时先显示子框体、再运行父框体的 OnShow。依据：只有这个顺序才能让 <code>AccountLogin_OnShow</code> 最终把焦点交给账号框。</li>
+      <li>SimpleHTML 的 <code>file</code> 属性要补 <code>Data\</code> 前缀，因为 MPQ 中实际存的是 <code>Data\eula.html</code>。</li>
+    </ul>
+  </li>
+  <li>中文客户端里看不到“记住帐号名”复选框是正常的：<code>GlueLocalization.lua</code> 在 zhCN 下会将其隐藏。</li>
+  <li><code>scan.html</code>、<code>contest.html</code>、<code>survey.html</code> 在这份客户端的 MPQ 中不存在，日志里对应的 3 条警告反映的是真实数据情况。</li>
+</ul>
+
+</body>
+</html>

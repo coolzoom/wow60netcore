@@ -7,6 +7,9 @@ using Formats.Mpq;
 // Usage: dotnet run --project src/Client -- [--data <Data dir>] [--map <Directory>] [--pos <x,y,z>] [--browse <filter>]
 //        [--fly] [--no-fog] [--radius <n|all>] [--distance <yards|inf>]
 //        [--procedural] [--seed <n>] [--frames <n> [--screenshot <file.bmp>]]
+//        dotnet run --project src/Client -- --glue [--no-loose] [--accept-eula] [--data <Data dir>]
+//          --glue: the login screens from Interface\GlueXML (TOC + XML + Lua), with loose files from the game
+//          directory layered over the MPQs unless --no-loose; --accept-eula skips the EULA/TOS pages.
 var options = new Dictionary<string, string>();
 var flags = new HashSet<string>();
 for (var i = 0; i < args.Length; i++)
@@ -32,6 +35,13 @@ if (flags.Contains("--procedural") || dataDirectory is null)
         Console.WriteLine("No client Data/*.MPQ found; starting the procedural scene. Pass --data <dir> to load game data.");
     using var procedural = new ClientGame(options.TryGetValue("--seed", out var seed) ? int.Parse(seed) : 1121);
     procedural.Run(gameOptions);
+    return;
+}
+
+if (flags.Contains("--glue"))
+{
+    using var glue = new GlueGame(dataDirectory, looseFiles: !flags.Contains("--no-loose"), acceptAgreements: flags.Contains("--accept-eula"));
+    glue.Run(gameOptions with { Title = "NetCore Client - GlueXML" });
     return;
 }
 
