@@ -10,7 +10,6 @@ using Formats.Terrain;
 using ImGuiNET;
 using Silk.NET.Input;
 using Silk.NET.OpenGL;
-using Silk.NET.OpenGL.Extensions.ImGui;
 using Shader = Engine.Rendering.Shader;
 
 namespace Client;
@@ -51,6 +50,12 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
     public bool FogEnabled { get; set; } = true;
     public float SpeedMultiplier { get; set; } = 1f;
 
+    /// <summary>On-screen controls (phones): held buttons set these each frame, added to keyboard input.</summary>
+    public Vector2 TouchMove { get; set; }
+    public float TouchVertical { get; set; }
+    public bool TouchJump { get; set; }
+    public void Zoom(float yards) => _camera.Distance += yards;
+
     /// <summary>When on, the frame rate is capped at the display refresh rate.</summary>
     public bool VSync
     {
@@ -85,7 +90,8 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
         _playerBody = new Mesh(Gl, MeshData.Box(new(0.8f, 1.2f, 0.5f), new(0.70f, 0.20f, 0.18f)));
         _playerHead = new Mesh(Gl, MeshData.Box(new(0.5f, 0.5f, 0.5f), new(0.93f, 0.78f, 0.62f)));
 
-        _imgui = new ImGuiController(Gl, Window, InputContext, UiFont.Create(_files), () => ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard);
+        _imgui = new ImGuiController(Gl, Window, InputContext, UiFont.Create(_files), () => ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard,
+            Options.UiScale, softKeyboard: Options.TouchControls);
         _ui = new WorldUi(this, browseFilter);
 
         var map = Maps.FirstOrDefault(m => m.Directory.Equals(mapDirectory, StringComparison.OrdinalIgnoreCase)) ?? Maps[0];
@@ -171,6 +177,9 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
             jump = Input.IsKeyDown(Key.Space);
             vertical = (Input.IsKeyDown(Key.Space) ? 1 : 0) - (Input.IsKeyDown(Key.ShiftLeft) || Input.IsKeyDown(Key.X) ? 1 : 0);
         }
+        move = Vector2.Clamp(move + TouchMove, -Vector2.One, Vector2.One);
+        vertical = Math.Clamp(vertical + TouchVertical, -1f, 1f);
+        jump |= TouchJump;
 
         _player.Update(dt, new CharacterInput(move, jump, vertical, Flying, SpeedMultiplier), _camera.Forward, _camera.Right);
         _camera.Target = _player.Position + new Vector3(0, 1.6f, 0);

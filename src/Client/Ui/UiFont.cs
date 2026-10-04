@@ -1,6 +1,5 @@
 using Formats.Mpq;
 using ImGuiNET;
-using Silk.NET.OpenGL.Extensions.ImGui;
 
 namespace Client.Ui;
 

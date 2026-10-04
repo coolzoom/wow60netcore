@@ -1,0 +1,51 @@
+using System.Numerics;
+using Android.App;
+using Android.Content.PM;
+using Engine;
+using Formats.Mpq;
+using Silk.NET.Windowing;
+using Silk.NET.Windowing.Sdl.Android;
+
+namespace Client;
+
+/// <summary>
+/// Android entry point: SDL hosts an OpenGL ES 3.0 surface and runs the same games as the desktop client.
+/// Game data goes in the app's external files directory: /sdcard/Android/data/org.netcoreclient.wow/files/Data/*.MPQ
+/// (android.sh 4 pushes it). Intent extras: mode = world | glue | procedural, map = map directory.
+/// </summary>
+[Activity(Name = "org.netcoreclient.wow.MainActivity", Label = "WoW NetCore", MainLauncher = true, Exported = true,
+    Theme = "@android:style/Theme.NoTitleBar.Fullscreen",
+    ScreenOrientation = ScreenOrientation.SensorLandscape,
+    ConfigurationChanges = ConfigChanges.Orientation | ConfigChanges.ScreenSize | ConfigChanges.ScreenLayout |
+                           ConfigChanges.Keyboard | ConfigChanges.KeyboardHidden | ConfigChanges.UiMode)]
+public sealed class MainActivity : SilkActivity
+{
+    private static readonly Vector3 Goldshire = new(-9464f, 62f, 56f);
+
+    protected override void OnRun()
+    {
+        var root = GetExternalFilesDir(null)!.AbsolutePath;
+        string? data;
+        try
+        {
+            data = MpqFileSystem.FindDataDirectory(root);
+        }
+        catch (UnauthorizedAccessException e)
+        {
+            Console.WriteLine($"Game data under {root} is not readable by the app ({e.Message}); files pushed as root need chown to the app's uid.");
+            data = null;
+        }
+        var mode = Intent?.GetStringExtra("mode") ?? "world";
+        var map = Intent?.GetStringExtra("map") ?? "Azeroth";
+        Console.WriteLine(data is null
+            ? $"No Data/*.MPQ under {root}; starting the procedural scene."
+            : $"Game data: {data}, mode {mode}");
+
+        var options = new GameOptions("WoW NetCore", UiScale: Resources?.DisplayMetrics?.Density ?? 1f, TouchControls: true);
+        var view = Silk.NET.Windowing.Window.GetView(ViewOptions.Default with { API = Game.MobileApi, VSync = true });
+        using Game game = data is null || mode == "procedural" ? new ClientGame(1121)
+            : mode == "glue" ? new GlueGame(data, looseFiles: false, acceptAgreements: true)
+            : new WorldGame(data, map, map.Equals("Azeroth", StringComparison.OrdinalIgnoreCase) ? Goldshire : null);
+        game.Run(view, options);
+    }
+}

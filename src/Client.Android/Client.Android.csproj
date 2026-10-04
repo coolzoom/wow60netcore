@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-android</TargetFramework>
+    <SupportedOSPlatformVersion>24</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>Client</RootNamespace>
+    <ApplicationId>org.netcoreclient.wow</ApplicationId>
+    <ApplicationTitle>WoW NetCore</ApplicationTitle>
+    <ApplicationVersion>1</ApplicationVersion>
+    <ApplicationDisplayVersion>0.1</ApplicationDisplayVersion>
+    <RuntimeIdentifiers>android-arm64;android-x64</RuntimeIdentifiers>
+    <AndroidPackageFormat>apk</AndroidPackageFormat>
+    <!-- MoonSharp and ImGui.NET use reflection; only trim the framework. -->
+    <TrimMode>partial</TrimMode>
+  </PropertyGroup>
+
+  <!-- The game itself is the desktop Client's code, minus its command-line entry point. -->
+  <ItemGroup>
+    <Compile Include="..\Client\**\*.cs" Exclude="..\Client\Program.cs;..\Client\bin\**;..\Client\obj\**" LinkBase="Client" />
+  </ItemGroup>
+
+  <!-- Android's implicit usings clash with game types (e.g. Android.Widget.Button vs FrameXml.Objects.Button). -->
+  <ItemGroup>
+    <Using Remove="Android.App" />
+    <Using Remove="Android.Widget" />
+    <Using Remove="Android.OS.Bundle" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Engine\Engine.csproj" />
+    <ProjectReference Include="..\Formats\Formats.csproj" />
+    <ProjectReference Include="..\FrameXml\FrameXml.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Its linux-x64 (glibc) cimgui would win over ours on android-x64 via RID fallback. -->
+    <PackageReference Include="ImGui.NET" Version="1.90.8.1" ExcludeAssets="native" />
+    <PackageReference Include="Silk.NET.Windowing.Sdl" Version="2.23.0" />
+    <!-- Android's SDL comes from Silk's .aar; this package would add the Linux (glibc) libSDL2-2.0.so via RID fallback. -->
+    <PackageReference Include="Ultz.Native.SDL" Version="2.32.10" ExcludeAssets="all" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!--
+    cimgui for ImGui.NET has no Android build on NuGet; android.sh compiles it with the NDK into native/<abi>/libcimgui.so,
+    which the Android SDK packages automatically (default **\*.so items, ABI taken from the folder name).
+  -->
+  <Target Name="RequireCimgui" BeforeTargets="Build" Condition="!Exists('native\arm64-v8a\libcimgui.so')">
+    <Warning Text="native/arm64-v8a/libcimgui.so is missing; run ./android.sh 1 (or 2) to build it with the NDK. The APK will crash at UI startup without it." />
+  </Target>
+
+</Project>

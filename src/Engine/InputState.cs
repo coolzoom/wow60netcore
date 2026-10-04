@@ -26,6 +26,12 @@ public sealed class InputState
                 _lastMousePosition = position;
             };
             _mouse.Scroll += (_, wheel) => ScrollDelta += wheel.Y;
+            // A new touch starts wherever the finger lands; don't turn that jump into a drag.
+            _mouse.MouseDown += (mouse, _) =>
+            {
+                MouseDelta = Vector2.Zero;
+                _lastMousePosition = mouse.Position;
+            };
         }
     }
 

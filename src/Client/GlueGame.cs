@@ -6,7 +6,6 @@ using FrameXml;
 using ImGuiNET;
 using Silk.NET.Input;
 using Silk.NET.OpenGL;
-using Silk.NET.OpenGL.Extensions.ImGui;
 
 namespace Client;
 
@@ -60,7 +59,7 @@ public sealed class GlueGame(string dataDirectory, bool looseFiles, bool acceptA
                           $"{_ui.Log.Problems.Count(p => p.Level == UiLogLevel.Warning)} warnings in {(DateTime.UtcNow - started).TotalMilliseconds:F0} ms; log: {log}");
 
         _renderer.CollectFonts();
-        _imgui = new ImGuiController(Gl, Window, InputContext, null, _renderer.ConfigureFonts);
+        _imgui = new ImGuiController(Gl, Window, InputContext, null, _renderer.ConfigureFonts, softKeyboard: Options.TouchControls);
         _ui.TextMeasurer = _renderer.Measure;
         _ui.InvalidateLayout();
 

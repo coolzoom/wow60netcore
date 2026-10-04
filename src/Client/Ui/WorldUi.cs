@@ -41,6 +41,69 @@ public sealed class WorldUi(WorldGame game, string? initialFilter = null)
         DrawFileBrowser();
         if (_showFps)
             DrawFpsOverlay();
+        if (Touch)
+            DrawTouchControls(dt);
+    }
+
+    private float Scale => game.Options.UiScale;
+    private bool Touch => game.Options.TouchControls;
+
+    /// <summary>Hold-to-move buttons (bottom left) and zoom (bottom right); dragging elsewhere turns the camera.</summary>
+    private void DrawTouchControls(float dt)
+    {
+        const ImGuiWindowFlags flags = ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoSavedSettings |
+                                       ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoNav | ImGuiWindowFlags.NoMove;
+        var viewport = ImGui.GetMainViewport();
+        var button = new Vector2(ImGui.GetFontSize() * 3.2f);
+        bool Hold(string label)
+        {
+            ImGui.Button(label, button);
+            return ImGui.IsItemActive();
+        }
+
+        ImGui.SetNextWindowPos(viewport.WorkPos + new Vector2(20 * Scale, viewport.WorkSize.Y - 20 * Scale), ImGuiCond.Always, new Vector2(0, 1));
+        ImGui.SetNextWindowBgAlpha(0.25f);
+        var move = Vector2.Zero;
+        var vertical = 0f;
+        var jump = false;
+        if (ImGui.Begin("##move", flags))
+        {
+            ImGui.Dummy(button);
+            ImGui.SameLine();
+            if (Hold("前")) move.Y += 1;
+            ImGui.SameLine();
+            if (Hold(game.Flying ? "升" : "跳"))
+            {
+                if (game.Flying) vertical += 1;
+                else jump = true;
+            }
+
+            if (Hold("左")) move.X -= 1;
+            ImGui.SameLine();
+            if (ImGui.Button(game.Flying ? "步行" : "飞行", button))
+                game.Flying = !game.Flying;
+            ImGui.SameLine();
+            if (Hold("右")) move.X += 1;
+
+            ImGui.Dummy(button);
+            ImGui.SameLine();
+            if (Hold("后")) move.Y -= 1;
+            ImGui.SameLine();
+            if (game.Flying && Hold("降")) vertical -= 1;
+        }
+        ImGui.End();
+        game.TouchMove = move;
+        game.TouchVertical = vertical;
+        game.TouchJump = jump;
+
+        ImGui.SetNextWindowPos(viewport.WorkPos + viewport.WorkSize - new Vector2(20 * Scale), ImGuiCond.Always, new Vector2(1, 1));
+        ImGui.SetNextWindowBgAlpha(0.25f);
+        if (ImGui.Begin("##zoom", flags))
+        {
+            if (Hold("拉近")) game.Zoom(-25f * dt);
+            if (Hold("拉远")) game.Zoom(25f * dt);
+        }
+        ImGui.End();
     }
 
     private void DrawFpsOverlay()
@@ -65,7 +128,7 @@ public sealed class WorldUi(WorldGame game, string? initialFilter = null)
         ImGui.TextColored(color, $"{_fps:F0} FPS");
         ImGui.SetWindowFontScale(1f);
         ImGui.Text($"帧时间 平均 {average:F1} ms  最慢 {worst:F1} ms");
-        ImGui.PlotLines("##frametimes", ref _frameTimes[0], _frameTimes.Length, _frameIndex, null, 0f, MathF.Max(50f, worst), new Vector2(220, 40));
+        ImGui.PlotLines("##frametimes", ref _frameTimes[0], _frameTimes.Length, _frameIndex, null, 0f, MathF.Max(50f, worst), new Vector2(220, 40) * Scale);
         var vsync = game.VSync;
         if (ImGui.Checkbox("垂直同步", ref vsync))
             game.VSync = vsync;
@@ -76,8 +139,9 @@ public sealed class WorldUi(WorldGame game, string? initialFilter = null)
 
     private void DrawWorldWindow()
     {
-        ImGui.SetNextWindowPos(new Vector2(10, 10), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Vector2(330, 0), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Vector2(10, 10) * Scale, ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(330, 0) * Scale, ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowCollapsed(Touch, ImGuiCond.FirstUseEver);
         if (!ImGui.Begin("世界"))
         {
             ImGui.End();
@@ -101,7 +165,7 @@ public sealed class WorldUi(WorldGame game, string? initialFilter = null)
         ImGui.SameLine();
         ImGui.Checkbox("FPS 面板", ref _showFps);
 
-        ImGui.SetNextItemWidth(240);
+        ImGui.SetNextItemWidth(240 * Scale);
         ImGui.InputFloat3("##tp", ref _teleport, "%.1f");
         ImGui.SameLine();
         if (ImGui.Button("传送"))
@@ -117,7 +181,7 @@ public sealed class WorldUi(WorldGame game, string? initialFilter = null)
         var radius = settings.LoadRadius == RenderSettings.AllTiles ? MaxLoadRadius : settings.LoadRadius;
         ImGui.Checkbox("飞行 (空格上升 / Shift 下降)", ref flying);
         var speed = game.SpeedMultiplier;
-        ImGui.SetNextItemWidth(ImGui.CalcItemWidth() - 50);
+        ImGui.SetNextItemWidth(ImGui.CalcItemWidth() - 50 * Scale);
         if (ImGui.SliderFloat("移动速度", ref speed, 1f, 100f, "%.0f 倍", ImGuiSliderFlags.Logarithmic | ImGuiSliderFlags.AlwaysClamp))
             game.SpeedMultiplier = speed;
         if (ImGui.IsItemHovered())
@@ -159,8 +223,9 @@ public sealed class WorldUi(WorldGame game, string? initialFilter = null)
 
     private void DrawFileBrowser()
     {
-        ImGui.SetNextWindowPos(new Vector2(10, 330), ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowSize(new Vector2(520, 420), ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowPos(new Vector2(10, 330) * Scale, ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowSize(new Vector2(520, 420) * Scale, ImGuiCond.FirstUseEver);
+        ImGui.SetNextWindowCollapsed(Touch, ImGuiCond.FirstUseEver);
         if (!ImGui.Begin("MPQ 文件"))
         {
             ImGui.End();

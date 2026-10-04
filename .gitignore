@@ -1,3 +1,10 @@
 bin/
 obj/
 imgui.ini
+
+# Android toolchain installed by android.sh (SDK also holds the JDK, private .NET, emulator AVD and cimgui sources)
+android-sdk/
+android-ndk/
+# NDK-built cimgui and the packaged APK / test output
+src/Client.Android/native/
+dist/

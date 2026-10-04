@@ -50,10 +50,20 @@ public sealed class Shader : IDisposable
         return location;
     }
 
+    /// <summary>
+    /// Sources are GLSL ES 3.00. Desktop core contexts (macOS stops at 4.1, without ES3 compatibility) get the same
+    /// code as GLSL 3.30, which accepts and ignores the precision qualifiers.
+    /// </summary>
+    public static string ForContext(GL gl, string source)
+    {
+        var isEs = gl.GetStringS(StringName.Version).StartsWith("OpenGL ES", StringComparison.Ordinal);
+        return isEs ? source : source.Replace("#version 300 es", "#version 330 core", StringComparison.Ordinal);
+    }
+
     private uint Compile(ShaderType type, string source)
     {
         var shader = _gl.CreateShader(type);
-        _gl.ShaderSource(shader, source);
+        _gl.ShaderSource(shader, ForContext(_gl, source));
         _gl.CompileShader(shader);
         _gl.GetShader(shader, ShaderParameterName.CompileStatus, out var compiled);
         if (compiled == 0)

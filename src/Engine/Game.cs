@@ -1,59 +1,82 @@
 using Silk.NET.Input;
+using Silk.NET.Input.Sdl;
 using Silk.NET.Maths;
 using Silk.NET.OpenGL;
 using Silk.NET.Windowing;
+using Silk.NET.Windowing.Sdl;
 
 namespace Engine;
 
 /// <param name="ScreenshotPath">If set together with ExitAfterFrames, the last frame is saved there as a BMP.</param>
-public sealed record GameOptions(string Title, int Width = 1280, int Height = 720, int? ExitAfterFrames = null, string? ScreenshotPath = null);
+/// <param name="UiScale">Scale for debug UI fonts and widgets (display density on phones).</param>
+/// <param name="TouchControls">Show on-screen movement controls (no keyboard).</param>
+public sealed record GameOptions(
+    string Title, int Width = 1280, int Height = 720, int? ExitAfterFrames = null, string? ScreenshotPath = null,
+    float UiScale = 1f, bool TouchControls = false);
 
+/// <summary>
+/// Game loop on an SDL view: a desktop window with an OpenGL 3.3 core context, or (on Android) the activity's
+/// surface with OpenGL ES 3.0. Shaders are written in GLSL ES 3.00 and adapted to the desktop context by <see cref="Rendering.Shader"/>.
+/// </summary>
 public abstract class Game : IDisposable
 {
-    private IWindow? _window;
+    /// <summary>macOS only exposes core profiles through a forward-compatible context.</summary>
+    public static readonly GraphicsAPI DesktopApi = new(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(3, 3));
+    public static readonly GraphicsAPI MobileApi = new(ContextAPI.OpenGLES, ContextProfile.Compatability, ContextFlags.Default, new APIVersion(3, 0));
+
+    private IView? _view;
     private IInputContext? _inputContext;
     private int _frames;
-    private int? _exitAfterFrames;
-    private string? _screenshotPath;
+
+    static Game()
+    {
+        SdlWindowing.Use();
+        SdlInput.Use();
+    }
 
     protected GL Gl { get; private set; } = null!;
     protected InputState Input { get; private set; } = null!;
-    protected IWindow Window => _window!;
+    protected IView Window => _view!;
     protected IInputContext InputContext => _inputContext!;
-    protected Vector2D<int> FramebufferSize => _window!.FramebufferSize;
+    protected Vector2D<int> FramebufferSize => _view!.FramebufferSize;
+    public GameOptions Options { get; private set; } = new("Game");
 
+    /// <summary>Opens a desktop window and runs until it is closed.</summary>
     public void Run(GameOptions options)
     {
-        _exitAfterFrames = options.ExitAfterFrames;
-        _screenshotPath = options.ScreenshotPath;
-
-        var windowOptions = WindowOptions.Default with
+        var window = Silk.NET.Windowing.Window.Create(WindowOptions.Default with
         {
             Title = options.Title,
             Size = new Vector2D<int>(options.Width, options.Height),
             VSync = true,
-            // macOS only exposes core profiles through a forward-compatible context.
-            API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.ForwardCompatible, new APIVersion(3, 3)),
-        };
-
-        _window = Silk.NET.Windowing.Window.Create(windowOptions);
-        _window.Load += HandleLoad;
-        _window.Update += dt => OnUpdate((float)dt);
-        _window.Render += HandleRender;
-        _window.FramebufferResize += size => Gl.Viewport(size);
-        _window.Closing += OnUnload;
-        _window.Run();
+            API = DesktopApi,
+        });
+        Run(window, options);
     }
 
-    protected void Exit() => _window?.Close();
+    /// <summary>Runs on an existing view, e.g. <c>Window.GetView</c> inside an Android <c>SilkActivity</c>.</summary>
+    public void Run(IView view, GameOptions options)
+    {
+        Options = options;
+        _view = view;
+        view.Load += HandleLoad;
+        view.Update += dt => OnUpdate((float)dt);
+        view.Render += HandleRender;
+        view.FramebufferResize += size => Gl.Viewport(size);
+        view.Closing += OnUnload;
+        view.Run();
+    }
+
+    protected void Exit() => _view?.Close();
 
     private void HandleLoad()
     {
-        var window = _window!;
-        Gl = GL.GetApi(window);
-        _inputContext = window.CreateInput();
+        var view = _view!;
+        Gl = GL.GetApi(view);
+        Console.WriteLine($"OpenGL: {Gl.GetStringS(StringName.Version)} / {Gl.GetStringS(StringName.Renderer)}");
+        _inputContext = view.CreateInput();
         Input = new InputState(_inputContext);
-        Gl.Viewport(window.FramebufferSize);
+        Gl.Viewport(view.FramebufferSize);
         OnLoad();
     }
 
@@ -63,10 +86,10 @@ public abstract class Game : IDisposable
         Input.EndFrame();
 
         _frames++;
-        if (_exitAfterFrames is { } limit && _frames >= limit)
+        if (Options.ExitAfterFrames is { } limit && _frames >= limit)
         {
-            if (_screenshotPath is not null)
-                SaveScreenshot(_screenshotPath);
+            if (Options.ScreenshotPath is { } path)
+                SaveScreenshot(path);
             Console.WriteLine($"Rendered {_frames} frames, exiting.");
             Exit();
         }
@@ -75,11 +98,19 @@ public abstract class Game : IDisposable
     private unsafe void SaveScreenshot(string path)
     {
         var size = FramebufferSize;
-        var pixels = new byte[size.X * size.Y * 3];
+        // RGBA/UNSIGNED_BYTE is the one read-back format OpenGL ES guarantees.
+        var rgba = new byte[size.X * size.Y * 4];
         Gl.PixelStore(PixelStoreParameter.PackAlignment, 1);
-        fixed (byte* p = pixels)
-            Gl.ReadPixels(0, 0, (uint)size.X, (uint)size.Y, PixelFormat.Bgr, PixelType.UnsignedByte, p);
-        Bitmap.WriteBgr24(path, size.X, size.Y, pixels);
+        fixed (byte* p = rgba)
+            Gl.ReadPixels(0, 0, (uint)size.X, (uint)size.Y, PixelFormat.Rgba, PixelType.UnsignedByte, p);
+        var bgr = new byte[size.X * size.Y * 3];
+        for (int i = 0, o = 0; i < rgba.Length; i += 4, o += 3)
+        {
+            bgr[o] = rgba[i + 2];
+            bgr[o + 1] = rgba[i + 1];
+            bgr[o + 2] = rgba[i];
+        }
+        Bitmap.WriteBgr24(path, size.X, size.Y, bgr);
         Console.WriteLine($"Saved screenshot to {path}");
     }
 
@@ -91,7 +122,7 @@ public abstract class Game : IDisposable
     public void Dispose()
     {
         _inputContext?.Dispose();
-        _window?.Dispose();
+        _view?.Dispose();
         GC.SuppressFinalize(this);
     }
 }
