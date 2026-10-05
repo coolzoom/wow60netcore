@@ -61,8 +61,8 @@ public sealed class SceneModel : IDisposable
     }
 
     /// <summary>
-    /// The scene camera at the current time: view and projection in render axes (vertical field of view from the
-    /// diagonal one of a 4:3 screen, so wider windows show more at the sides) and the model-space camera basis.
+    /// The scene camera at the current time: view and projection in render axes (the field of view is diagonal, so
+    /// wider windows crop the top and bottom rather than seeing past the scene's sides) and the model-space camera basis.
     /// </summary>
     public (SceneView View, Matrix4x4 Billboard)? Camera(int index, float aspect)
     {
@@ -88,11 +88,13 @@ public sealed class SceneModel : IDisposable
             up.X, up.Y, up.Z, 0,
             0, 0, 0, 1);
 
-        var verticalFov = 2 * MathF.Atan(MathF.Tan(camera.FieldOfView / 2) / MathF.Sqrt(1 + 16f / 9f));
+        aspect = Math.Max(aspect, 0.1f);
+        var verticalFov = 2 * MathF.Atan(MathF.Tan(camera.FieldOfView / 2) / MathF.Sqrt(1 + aspect * aspect));
         var near = Math.Max(camera.NearClip, 0.05f);
-        var far = Math.Max(camera.FarClip, near + 1);
+        // Sky domes sit right at the far clip; at wide aspect ratios their corners would be cut off.
+        var far = Math.Max(camera.FarClip * 4, near + 1);
         var view = Matrix4x4.CreateLookAt(WorldSpace.ModelToRender(eye), WorldSpace.ModelToRender(target), WorldSpace.ModelToRender(up));
-        var projection = Matrix4x4.CreatePerspectiveFieldOfView(verticalFov, Math.Max(aspect, 0.1f), near, far);
+        var projection = Matrix4x4.CreatePerspectiveFieldOfView(verticalFov, aspect, near, far);
         return (new SceneView(view, projection, WorldSpace.ModelToRender(right), WorldSpace.ModelToRender(up)), billboard);
     }
 
@@ -118,8 +120,11 @@ public sealed class SceneModel : IDisposable
             emitter.Build(view.Right, view.Up);
     }
 
-    /// <summary>Ambient light and the scene's lights at the current time, in render axes.</summary>
-    public (Vector3 Ambient, List<SceneLight> Lights) Lighting()
+    /// <summary>
+    /// Ambient light and the scene's lights at the current time, in render axes. Directional lights shine from their
+    /// position toward <paramref name="focus"/> (where the character stands).
+    /// </summary>
+    public (Vector3 Ambient, List<SceneLight> Lights) Lighting(Vector3 focus)
     {
         var ambient = Vector3.Zero;
         var lights = new List<SceneLight>();
@@ -136,7 +141,8 @@ public sealed class SceneModel : IDisposable
             var position = WorldSpace.ModelToRender(light.Position);
             if (_actor is { } actor && light.Bone >= 0 && light.Bone < actor.Bones.Count)
                 position = Vector3.Transform(position, actor.Bones[light.Bone]);
-            lights.Add(new SceneLight(light.Type == M2Light.Point, position, diffuse,
+            var point = light.Type == M2Light.Point;
+            lights.Add(new SceneLight(point, point ? position : position - focus, diffuse,
                 Sample(light.AttenuationStart, 0f, float.Lerp), Sample(light.AttenuationEnd, 0f, float.Lerp)));
         }
         if (_effects.Lights.Count == 0)

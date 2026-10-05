@@ -15,6 +15,7 @@ using Formats.Mpq;
 //          [--login <account:password> [--enter-world [--auto-fight]]] logs in (and enters with the first character)
 //          unattended; --auto-fight then runs to the nearest non-friendly creature, fights and loots it (combat test).
 //          [--ui-script <lua>] runs Lua in the in-game interface once the player is in the world (e.g. "ToggleBackpack()").
+//          [--glue-screen <charselect|charcreate|disconnected>] opens that screen first instead of the login.
 var options = new Dictionary<string, string>();
 var flags = new HashSet<string>();
 for (var i = 0; i < args.Length; i++)
@@ -53,7 +54,7 @@ if (flags.Contains("--glue"))
         AutoFight = flags.Contains("--auto-fight"),
         UiScript = options.GetValueOrDefault("--ui-script"),
     };
-    using var glue = online.Glue();
+    using var glue = online.Glue(options.GetValueOrDefault("--glue-screen", "login"));
     glue.Run(gameOptions with { Title = "NetCore Client" });
     return;
 }

@@ -10,7 +10,7 @@ namespace Client.World;
 /// <summary>A camera in render axes, plus its right and up vectors for camera-facing quads.</summary>
 public readonly record struct SceneView(Matrix4x4 View, Matrix4x4 Projection, Vector3 Right, Vector3 Up);
 
-/// <summary>A light in render axes: directional ones shine from <see cref="Position"/> toward the origin.</summary>
+/// <summary>A light in render axes: for directional ones <see cref="Position"/> is the direction toward the light.</summary>
 public readonly record struct SceneLight(bool Point, Vector3 Position, Vector3 Color, float RangeStart, float RangeEnd);
 
 /// <summary>How one batch looks this frame: its texture, color (with transparency in alpha) and UV transform.</summary>

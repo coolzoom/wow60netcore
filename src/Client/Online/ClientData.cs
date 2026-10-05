@@ -104,15 +104,17 @@ public sealed class ClientData
                 extras.GetString(r, 18) is { Length: > 0 } baked ? $"Textures\\BakedNpcTextures\\{baked}" : null, items);
         });
 
+        // 1.12 layout (23 fields): id, models[2], model textures[2], icon, geoset groups[3], flags, spell visual,
+        // group sound, helmet geoset vis[2], region textures[8], item visual.
         var itemDisplays = Dbc("ItemDisplayInfo");
         foreach (var r in Rows(itemDisplays))
         {
             var id = itemDisplays.GetInt(r, 0);
             _itemDisplays[id] = new ItemDisplay(id, [itemDisplays.GetString(r, 1), itemDisplays.GetString(r, 2)],
                 [itemDisplays.GetString(r, 3), itemDisplays.GetString(r, 4)],
-                [itemDisplays.GetInt(r, 7), itemDisplays.GetInt(r, 8), itemDisplays.GetInt(r, 9)],
-                [itemDisplays.GetInt(r, 13), itemDisplays.GetInt(r, 14)],
-                [.. Enumerable.Range(15, 8).Select(f => itemDisplays.GetString(r, f))]);
+                [itemDisplays.GetInt(r, 6), itemDisplays.GetInt(r, 7), itemDisplays.GetInt(r, 8)],
+                [itemDisplays.GetInt(r, 12), itemDisplays.GetInt(r, 13)],
+                [.. Enumerable.Range(14, 8).Select(f => itemDisplays.GetString(r, f))]);
         }
         var helmets = Dbc("HelmetGeosetVisData");
         foreach (var r in Rows(helmets))

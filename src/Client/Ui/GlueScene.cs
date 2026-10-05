@@ -20,7 +20,6 @@ public sealed class GlueScene(GL gl, AssetCache assets, UiScreen ui, GlueApi api
     private readonly Dictionary<string, SkinnedActor?> _actors = new(StringComparer.OrdinalIgnoreCase);
     private SceneModel? _scene;
     private uint _characterTime;
-
     public void Render(Vector2 size, float dt)
     {
         if (Frame() is not { } frame)
@@ -37,8 +36,11 @@ public sealed class GlueScene(GL gl, AssetCache assets, UiScreen ui, GlueApi api
 
         _scene.Update(dt, billboard, view);
         _characterTime += (uint)Math.Max(1, dt * 1000);
-        var (ambient, lights) = _scene.Lighting();
+        var (ambient, lights) = _scene.Lighting(_scene.Attachment(0)?.Translation ?? Vector3.Zero);
         var fog = frame.FogColor is { } color ? new Vector3(color.R, color.G, color.B) : Vector3.Zero;
+        // Wide windows can see past the edge of a sky dome; there the scene fades to its fog rather than black.
+        gl.ClearColor(fog.X, fog.Y, fog.Z, 1);
+        gl.Clear(ClearBufferMask.ColorBufferBit);
         _renderer.Begin(view, ambient, lights, fog, frame.FogColor is null ? null : (frame.FogNear, frame.FogFar));
         _scene.Draw(_renderer, false);
         var character = Character(frame);

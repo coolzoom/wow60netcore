@@ -187,7 +187,7 @@ public static class Shaders
                     }
                     light += uLightColor[i] * max(dot(normal, toLight), 0.0) * attenuation;
                 }
-                color *= clamp(light, 0.0, 2.0);
+                color *= clamp(light, 0.0, 1.0);
             }
             if (uFog.y > uFog.x)
                 color = mix(color, uFogColor, clamp((vViewDistance - uFog.x) / (uFog.y - uFog.x), 0.0, 1.0));
