@@ -1,4 +1,5 @@
 using System.Numerics;
+using Engine;
 using ImGuiNET;
 using Silk.NET.Input;
 using Silk.NET.OpenGL;
@@ -146,7 +147,7 @@ public sealed class ImGuiController : IDisposable
     {
         var io = ImGui.GetIO();
         var size = _view.Size;
-        var framebuffer = _view.FramebufferSize;
+        var framebuffer = _view.SafeFramebufferSize();
         io.DisplaySize = new Vector2(size.X, size.Y);
         if (size.X > 0 && size.Y > 0)
             io.DisplayFramebufferScale = new Vector2(framebuffer.X / (float)size.X, framebuffer.Y / (float)size.Y);
@@ -223,7 +224,7 @@ public sealed class ImGuiController : IDisposable
         _gl.Disable(EnableCap.ScissorTest);
         _gl.Disable(EnableCap.Blend);
         _gl.Enable(EnableCap.DepthTest);
-        var framebuffer = _view.FramebufferSize;
+        var framebuffer = _view.SafeFramebufferSize();
         _gl.Viewport(0, 0, (uint)framebuffer.X, (uint)framebuffer.Y);
     }
 

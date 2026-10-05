@@ -46,22 +46,7 @@ public abstract class Game : IDisposable
     protected InputState Input { get; private set; } = null!;
     protected IView Window => _view!;
     protected IInputContext InputContext => _inputContext!;
-    protected Vector2D<int> FramebufferSize
-    {
-        get
-        {
-            try
-            {
-                return _view!.FramebufferSize;
-            }
-            catch (Silk.NET.SDL.SdlException)
-            {
-                // Silk reports any error SDL left pending from an earlier, unrelated call (e.g. touch reset).
-                Silk.NET.SDL.Sdl.GetApi().ClearError();
-                return _view!.FramebufferSize;
-            }
-        }
-    }
+    protected Vector2D<int> FramebufferSize => _view!.SafeFramebufferSize();
     public GameOptions Options { get; private set; } = new("Game");
 
     /// <summary>Opens a desktop window and runs until it is closed.</summary>
@@ -119,7 +104,7 @@ public abstract class Game : IDisposable
         Console.WriteLine($"OpenGL: {Gl.GetStringS(StringName.Version)} / {Gl.GetStringS(StringName.Renderer)}");
         _inputContext = view.CreateInput();
         Input = new InputState(_inputContext);
-        Gl.Viewport(view.FramebufferSize);
+        Gl.Viewport(view.SafeFramebufferSize());
         OnLoad();
     }
 
