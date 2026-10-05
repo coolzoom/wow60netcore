@@ -83,7 +83,12 @@ public sealed class GlueNetwork : IDisposable
     {
         _ui = ui;
 
-        Fn("DefaultServerLogin", a => { Login(a.Str(0) ?? "", a.Str(1) ?? ""); return DynValue.Nil; });
+        Fn("DefaultServerLogin", a =>
+        {
+            _api.SaveRealmList();
+            Login(a.Str(0) ?? "", a.Str(1) ?? "");
+            return DynValue.Nil;
+        });
         Fn("StatusDialogClick", _ =>
         {
             if (_session.State is SessionState.Authenticating or SessionState.ConnectingWorld)

@@ -139,6 +139,30 @@ public class UiLoaderTests
     }
 
     [Fact]
+    public void GlueApi_SaveRealmListReplacesOnlyTheRealmListLine()
+    {
+        var directory = Directory.CreateTempSubdirectory().FullName;
+        try
+        {
+            var path = Path.Combine(directory, "realmlist.wtf");
+            File.WriteAllText(path, "set realmlist old.example.org\nset patchlist patch.example.org\n");
+            var api = new GlueApi();
+            api.LoadConfig(directory);
+            Assert.Null(api.SaveRealmList());
+            api.SetCVar("realmList", " 127.0.0.1:3724 ");
+            Assert.Equal(path, api.SaveRealmList());
+            Assert.Equal("set realmlist 127.0.0.1:3724\nset patchlist patch.example.org\n", File.ReadAllText(path));
+            var reloaded = new GlueApi();
+            reloaded.LoadConfig(directory);
+            Assert.Equal("127.0.0.1:3724", reloaded.GetCVar("realmList"));
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
     public void Toc_LoadsFilesRelativeToTocAndIncludesRelativeToFile()
     {
         var ui = Load(

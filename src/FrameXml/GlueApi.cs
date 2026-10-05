@@ -37,6 +37,7 @@ public sealed partial class GlueApi
 
     private UiScreen? _ui;
     private List<AddOnInfo> _addOns = [];
+    private string? _gameDirectory;
 
     public IReadOnlyDictionary<string, string> CVars => _cvars;
 
@@ -75,6 +76,7 @@ public sealed partial class GlueApi
     /// <summary>Reads realmlist.wtf and WTF\Config.wtf ("SET name "value"" lines) from a game directory.</summary>
     public void LoadConfig(string gameDirectory)
     {
+        _gameDirectory = gameDirectory;
         foreach (var file in new[] { Path.Combine(gameDirectory, "realmlist.wtf"), Path.Combine(gameDirectory, "WTF", "Config.wtf") })
             if (File.Exists(file))
                 LoadConfigText(File.ReadAllText(file));
@@ -88,6 +90,38 @@ public sealed partial class GlueApi
 
     [GeneratedRegex("""^\s*set\s+(\S+)\s+(?:"([^"]*)"|(\S+))""", RegexOptions.IgnoreCase | RegexOptions.Multiline)]
     private static partial Regex ConfigLine();
+
+    /// <summary>
+    /// Writes the realmList CVar to realmlist.wtf in the directory LoadConfig read, replacing its "set realmlist" line
+    /// and keeping the others (patchlist and so on). Returns the path written, or null when nothing changed.
+    /// </summary>
+    public string? SaveRealmList()
+    {
+        var address = (GetCVar("realmList") ?? "").Trim();
+        if (_gameDirectory is null || address.Length == 0)
+            return null;
+        var path = Path.Combine(_gameDirectory, "realmlist.wtf");
+        var text = File.Exists(path) ? File.ReadAllText(path) : "";
+        var line = $"set realmlist {address}";
+        var updated = RealmListLine().IsMatch(text)
+            ? RealmListLine().Replace(text, line, 1)
+            : line + (text.Length > 0 ? "\n" + text : "\n");
+        if (updated == text)
+            return null;
+        try
+        {
+            File.WriteAllText(path, updated);
+            return path;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"Could not save {path}: {e.Message}");
+            return null;
+        }
+    }
+
+    [GeneratedRegex(@"^[ \t]*set[ \t]+realmlist\b[^\r\n]*", RegexOptions.IgnoreCase | RegexOptions.Multiline)]
+    private static partial Regex RealmListLine();
 
     public void Register(UiScreen ui)
     {
@@ -119,6 +153,7 @@ public sealed partial class GlueApi
         {
             var account = a.Str(0) ?? "";
             var password = a.Str(1) ?? "";
+            SaveRealmList();
             if (LoginRequested is { } login)
                 login(account, password);
             else
