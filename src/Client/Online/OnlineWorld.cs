@@ -400,6 +400,7 @@ public sealed class OnlineWorld : IDisposable
         var draw = ImGui.GetBackgroundDrawList();
         var font = _ui.WorldFont;
         var fontSize = 14f * screen.Y / 768f;
+        var playerLevel = (int)(_session.Player?.Level ?? 1);
         foreach (var obj in _session.Objects.All)
         {
             if (!obj.IsUnit || obj.Name is not { Length: > 0 } name)
@@ -412,22 +413,24 @@ public sealed class OnlineWorld : IDisposable
             if (clip.W <= 0.1f)
                 continue;
             var ndc = new Vector2(clip.X, clip.Y) / clip.W;
+            var head = new Vector2((ndc.X + 1) * 0.5f * screen.X, (1 - ndc.Y) * 0.5f * screen.Y);
+            var reaction = _api.ReactionOf(obj);
+            if (!obj.IsDead && obj.Guid != _session.PlayerGuid && (target || reaction != Reaction.Friendly))
+            {
+                DrawNameplate(draw, font, fontSize, obj, name, head, target, reaction, playerLevel, screen.Y / 768f);
+                continue;
+            }
+
             var size = font.CalcTextSizeA(fontSize, float.MaxValue, 0, name);
-            var at = new Vector2((ndc.X + 1) * 0.5f * screen.X - size.X / 2, (1 - ndc.Y) * 0.5f * screen.Y);
-            var color = obj.TappedByOther || obj.IsDead ? 0xFFA0A0A0u : obj.Type == ObjectType.Player ? 0xFFFFC080u : _api.ReactionOf(obj) switch
+            var at = head - new Vector2(size.X / 2, 0);
+            var color = obj.TappedByOther || obj.IsDead ? 0xFFA0A0A0u : obj.Type == ObjectType.Player ? 0xFFFFC080u : reaction switch
             {
                 Reaction.Hostile => 0xFF4040FFu,
                 Reaction.Neutral => 0xFF30FFFFu,
                 _ => 0xFF40FF40u,
             };
             if (target)
-            {
                 draw.AddRectFilled(at - new Vector2(4, 2), at + size + new Vector2(4, 2), 0x80000000, 3);
-                var bar = new Vector2(at.X, at.Y + size.Y + 3);
-                var width = Math.Max(size.X, 60);
-                draw.AddRectFilled(bar, bar + new Vector2(width, 5), 0xC0000000);
-                draw.AddRectFilled(bar, bar + new Vector2(width * (obj.MaxHealth == 0 ? 0 : obj.Health / (float)obj.MaxHealth), 5), 0xFF20C020);
-            }
             draw.AddText(font, fontSize, at + Vector2.One, 0xFF000000, name);
             draw.AddText(font, fontSize, at, color, name);
         }
@@ -450,6 +453,82 @@ public sealed class OnlineWorld : IDisposable
             draw.AddText(font, size, at + new Vector2(1.5f), alpha, f.Text);
             draw.AddText(font, size, at, (f.Color & 0x00FFFFFF) | alpha, f.Text);
         }
+    }
+
+    private const string NameplateBorder = "Interface\\Tooltips\\Nameplate-Border.blp";
+    private const string NameplateGlow = "Interface\\Tooltips\\Nameplate-Glow.blp";
+    private const string NameplateBar = "Interface\\TargetingFrame\\UI-TargetingFrame-BarFill.blp";
+    private const string NameplateSkull = "Interface\\TargetingFrame\\UI-TargetingFrame-Skull.blp";
+    /// <summary>
+    /// Layout of the 128x32 border texture, in its pixels: the health bar's hollow, the level box on its right, and
+    /// the empty top half where the name goes.
+    /// </summary>
+    private static readonly Vector2 PlateSize = new(128, 32), PlateBarMin = new(5, 20), PlateBarMax = new(105, 27),
+        PlateLevel = new(116, 23.5f);
+    private const float PlateTop = 16;
+
+    /// <summary>
+    /// The client's nameplate over a unit's head: health bar colored by reaction (grey once another player tapped
+    /// it), the border with the level box (a skull ten or more levels above the player), the name above, and the
+    /// glow around the current target. <paramref name="scale"/> is the UI scale (screen height / 768).
+    /// </summary>
+    private void DrawNameplate(ImDrawListPtr draw, ImFontPtr font, float fontSize, WorldObject obj, string name, Vector2 head,
+        bool target, Reaction reaction, int playerLevel, float scale)
+    {
+        var assets = _game.Assets;
+        var min = new Vector2(head.X - (PlateBarMin.X + PlateBarMax.X) / 2 * scale, head.Y - PlateSize.Y * scale);
+        Vector2 At(Vector2 texel) => min + texel * scale;
+
+        if (target && assets.Texture("@add:" + NameplateGlow, () => assets.Image(NameplateGlow) is { } glow
+                ? new Formats.Blp.RgbaImage(glow.Width, glow.Height, Ui.GlueRenderer.AdditiveToAlpha(glow.Pixels)) : null) is { } highlight)
+            draw.AddImage((IntPtr)highlight.Handle, min, At(PlateSize), Vector2.Zero, Vector2.One, 0xFF00D0FF);
+
+        var barMin = At(PlateBarMin);
+        var barMax = At(PlateBarMax);
+        draw.AddRectFilled(barMin, barMax, 0x80000000);
+        var health = obj.MaxHealth == 0 ? 0 : Math.Clamp(obj.Health / (float)obj.MaxHealth, 0, 1);
+        var color = obj.TappedByOther ? 0xFF808080u : reaction switch
+        {
+            Reaction.Hostile => 0xFF0000FFu,
+            Reaction.Neutral => 0xFF00FFFFu,
+            _ => 0xFF00FF00u,
+        };
+        if (health > 0 && assets.Texture(NameplateBar) is { } bar)
+            draw.AddImage((IntPtr)bar.Handle, barMin, new Vector2(barMin.X + (barMax.X - barMin.X) * health, barMax.Y),
+                Vector2.Zero, new Vector2(health, 1), color);
+        if (assets.Texture(NameplateBorder) is { } border)
+            draw.AddImage((IntPtr)border.Handle, min, At(PlateSize));
+
+        var level = (int)obj.Level;
+        var levelAt = At(PlateLevel);
+        if (level >= playerLevel + 10 && assets.Texture(NameplateSkull) is { } skull)
+            draw.AddImage((IntPtr)skull.Handle, levelAt - new Vector2(7 * scale), levelAt + new Vector2(7 * scale));
+        else
+        {
+            var text = level.ToString();
+            var levelSize = fontSize * 0.8f;
+            var extent = font.CalcTextSizeA(levelSize, float.MaxValue, 0, text);
+            var at = levelAt - extent / 2;
+            draw.AddText(font, levelSize, at + Vector2.One, 0xFF000000, text);
+            draw.AddText(font, levelSize, at, LevelColor(level, playerLevel), text);
+        }
+
+        var nameSize = font.CalcTextSizeA(fontSize, float.MaxValue, 0, name);
+        var nameAt = new Vector2(head.X - nameSize.X / 2, min.Y + PlateTop * scale - nameSize.Y);
+        draw.AddText(font, fontSize, nameAt + Vector2.One, 0xFF000000, name);
+        draw.AddText(font, fontSize, nameAt, 0xFFFFFFFF, name);
+    }
+
+    /// <summary>The 1.12 difficulty color of a level relative to the player's (red, orange, yellow, green, grey; ImGui ABGR).</summary>
+    private static uint LevelColor(int level, int playerLevel)
+    {
+        var diff = level - playerLevel;
+        var grey = playerLevel <= 5 ? 0 : playerLevel <= 39 ? playerLevel - 5 - playerLevel / 10 : playerLevel - 1 - playerLevel / 5;
+        return diff >= 5 ? 0xFF1A1AFFu
+            : diff >= 3 ? 0xFF4080FFu
+            : diff >= -2 ? 0xFF00D1FFu
+            : level > grey ? 0xFF40BF40u
+            : 0xFF808080u;
     }
 
     /// <summary>Left click selects; right click attacks, loots, talks or uses a game object.</summary>

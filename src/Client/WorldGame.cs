@@ -321,7 +321,7 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
         {
             var stats = _scene.Stats;
             var progress = stats.Tiles / (float)Math.Max(1, stats.Tiles + stats.PendingTiles) * 0.9f + (_assets.PendingCount == 0 ? 0.1f : 0f);
-            LoadingScreen.Draw(_assets, _loadingImage, new Vector2(Window.Size.X, Window.Size.Y), progress, _scene.Map.Name);
+            LoadingScreen.Draw(_assets, _loadingImage, new Vector2(Window.Size.X, Window.Size.Y), progress);
         }
         _imgui.Render();
     }

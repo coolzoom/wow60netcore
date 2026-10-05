@@ -491,7 +491,7 @@ public sealed class GlueRenderer : IDisposable
     }
 
     /// <summary>ImGui only alpha-blends; additive textures become (rgb / a, a = max(rgb)), which looks the same over dark backgrounds.</summary>
-    private static byte[] AdditiveToAlpha(byte[] rgba)
+    internal static byte[] AdditiveToAlpha(byte[] rgba)
     {
         var result = new byte[rgba.Length];
         for (var i = 0; i < rgba.Length; i += 4)
