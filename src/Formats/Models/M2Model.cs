@@ -10,8 +10,16 @@ public enum BlendMode
     Additive = 3,
 }
 
-/// <summary>A draw range sharing one texture and blend state. Texture is null for runtime-replaceable skins.</summary>
-public sealed record ModelBatch(int IndexStart, int IndexCount, string? Texture, BlendMode Blend, bool TwoSided);
+/// <summary>
+/// A draw range sharing one texture and blend state. Texture is null for runtime-replaceable skins, whose kind is
+/// <see cref="TextureType"/> (1 character skin, 2 cape, 6 hair, 11-13 creature skins). Geoset is the submesh id
+/// characters use to pick hair styles and equipment pieces (0 = always shown).
+/// </summary>
+public sealed record ModelBatch(int IndexStart, int IndexCount, string? Texture, BlendMode Blend, bool TwoSided,
+    int TextureType = 0, int Geoset = 0);
+
+/// <summary>A point items attach to (1 right hand, 2 left hand, 0 shield, 5/6 shoulders, 11 helmet, 26-28 sheathed).</summary>
+public sealed record M2Attachment(int Id, int Bone, Vector3 Position);
 
 /// <summary>Static geometry of an M2 model (v256, 1.12), from its highest-detail view in bind pose.</summary>
 public sealed class M2Model
@@ -21,6 +29,7 @@ public sealed class M2Model
     private const int ViewStride = 44;
     private const int SubmeshStride = 32;
     private const int BatchStride = 24;
+    private const int AttachmentStride = 48;
 
     /// <summary>Model-local positions (X forward, Y left, Z up); see WorldSpace.ModelToRender.</summary>
     public Vector3[] Positions { get; }
@@ -28,6 +37,7 @@ public sealed class M2Model
     public Vector2[] TexCoords { get; }
     public ushort[] Indices { get; }
     public IReadOnlyList<ModelBatch> Batches { get; }
+    public IReadOnlyList<M2Attachment> Attachments { get; }
     public string Name { get; }
 
     public M2Model(byte[] data)
@@ -53,6 +63,19 @@ public sealed class M2Model
             TexCoords[i] = data.Vec2(o + 32);
         }
 
+        var attachments = new List<M2Attachment>();
+        if (data.Length >= 0x10C)
+        {
+            var attachmentCount = data.I32(0x104);
+            var attachmentOffset = data.I32(0x108);
+            for (var i = 0; i < attachmentCount && attachmentOffset + (i + 1) * AttachmentStride <= data.Length; i++)
+            {
+                var o = attachmentOffset + i * AttachmentStride;
+                attachments.Add(new M2Attachment((int)data.U32(o), data.U16(o + 4), data.Vec3(o + 8)));
+            }
+        }
+        Attachments = attachments;
+
         if (data.I32(0x4C) == 0)
         {
             Indices = [];
@@ -65,7 +88,7 @@ public sealed class M2Model
         var triangles = data.Structs<ushort>(data.I32(view + 12), data.I32(view + 8));
         Indices = triangles.Select(t => vertexLookup[t]).ToArray();
 
-        var textureNames = ReadTextures(data);
+        var (textureNames, textureTypes) = ReadTextures(data);
         var textureLookup = data.Structs<ushort>(data.I32(0x98), data.I32(0x94));
         var materials = data.Structs<uint>(data.I32(0x88), data.I32(0x84));
 
@@ -88,12 +111,12 @@ public sealed class M2Model
             var indexStart = data.U16(s + 8);
             var indexCount = data.U16(s + 10);
 
-            var texture = textureCombo < textureLookup.Length && textureLookup[textureCombo] < textureNames.Length
-                ? textureNames[textureLookup[textureCombo]]
-                : null;
+            var textureIndex = textureCombo < textureLookup.Length ? textureLookup[textureCombo] : -1;
+            var texture = textureIndex >= 0 && textureIndex < textureNames.Length ? textureNames[textureIndex] : null;
+            var textureType = textureIndex >= 0 && textureIndex < textureTypes.Length ? textureTypes[textureIndex] : 0;
             var flags = material < materials.Length ? materials[material] & 0xFFFF : 0;
             var blend = material < materials.Length ? (BlendMode)Math.Min(materials[material] >> 16, 3) : BlendMode.Opaque;
-            batches.Add(new ModelBatch(indexStart, indexCount, texture, blend, TwoSided: (flags & 0x4) != 0));
+            batches.Add(new ModelBatch(indexStart, indexCount, texture, blend, TwoSided: (flags & 0x4) != 0, textureType, data.U16(s)));
         }
         Batches = batches;
     }
@@ -104,17 +127,19 @@ public sealed class M2Model
             ? path[..^4] + ".m2"
             : path;
 
-    private static string?[] ReadTextures(byte[] data)
+    private static (string?[] Names, int[] Types) ReadTextures(byte[] data)
     {
         var count = data.I32(0x5C);
         var offset = data.I32(0x60);
         var names = new string?[count];
+        var types = new int[count];
         for (var i = 0; i < count; i++)
         {
             var o = offset + i * 16;
             // Type 0 = file name; other types are skins chosen at runtime from DBC data.
-            names[i] = data.U32(o) == 0 && data.I32(o + 8) > 1 ? data.CString(data.I32(o + 12), data.I32(o + 8)) : null;
+            types[i] = (int)data.U32(o);
+            names[i] = types[i] == 0 && data.I32(o + 8) > 1 ? data.CString(data.I32(o + 12), data.I32(o + 8)) : null;
         }
-        return names;
+        return (names, types);
     }
 }

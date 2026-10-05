@@ -1,5 +1,6 @@
 ﻿using System.Numerics;
 using Client;
+using Client.Online;
 using Client.World;
 using Engine;
 using Formats.Mpq;
@@ -7,9 +8,13 @@ using Formats.Mpq;
 // Usage: dotnet run --project src/Client -- [--data <Data dir>] [--map <Directory>] [--pos <x,y,z>] [--browse <filter>]
 //        [--fly] [--no-fog] [--radius <n|all>] [--distance <yards|inf>]
 //        [--procedural] [--seed <n>] [--frames <n> [--screenshot <file.bmp>]]
-//        dotnet run --project src/Client -- --glue [--no-loose] [--accept-eula] [--data <Data dir>]
+//        dotnet run --project src/Client -- --glue [--no-loose] [--accept-eula] [--realmlist <host[:port]>] [--data <Data dir>]
 //          --glue: the login screens from Interface\GlueXML (TOC + XML + Lua), with loose files from the game
 //          directory layered over the MPQs unless --no-loose; --accept-eula skips the EULA/TOS pages.
+//          Logs in to the server in realmlist.wtf (or --realmlist), then character select/create and the world.
+//          [--login <account:password> [--enter-world [--auto-fight]]] logs in (and enters with the first character)
+//          unattended; --auto-fight then runs to the nearest non-friendly creature, fights and loots it (combat test).
+//          [--ui-script <lua>] runs Lua in the in-game interface once the player is in the world (e.g. "ToggleBackpack()").
 var options = new Dictionary<string, string>();
 var flags = new HashSet<string>();
 for (var i = 0; i < args.Length; i++)
@@ -40,8 +45,16 @@ if (flags.Contains("--procedural") || dataDirectory is null)
 
 if (flags.Contains("--glue"))
 {
-    using var glue = new GlueGame(dataDirectory, looseFiles: !flags.Contains("--no-loose"), acceptAgreements: flags.Contains("--accept-eula"));
-    glue.Run(gameOptions with { Title = "NetCore Client - GlueXML" });
+    using var online = new OnlineClient(dataDirectory, looseFiles: !flags.Contains("--no-loose"), acceptAgreements: flags.Contains("--accept-eula"),
+        options.GetValueOrDefault("--realmlist"))
+    {
+        AutoLogin = options.GetValueOrDefault("--login"),
+        AutoEnterWorld = flags.Contains("--enter-world"),
+        AutoFight = flags.Contains("--auto-fight"),
+        UiScript = options.GetValueOrDefault("--ui-script"),
+    };
+    using var glue = online.Glue();
+    glue.Run(gameOptions with { Title = "NetCore Client" });
     return;
 }
 

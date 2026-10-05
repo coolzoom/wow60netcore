@@ -1,4 +1,5 @@
 using System.Numerics;
+using Client.Online;
 using Client.Ui;
 using Engine;
 using Formats.Mpq;
@@ -26,8 +27,12 @@ public sealed class GlueGame(string dataDirectory, bool looseFiles, bool acceptA
     private ImGuiController _imgui = null!;
     private GlueRenderer _renderer = null!;
     private UiScreen _ui = null!;
+    private GlueNetwork? _network;
 
     public UiScreen Ui => _ui;
+    /// <summary>Set to log in to a server; without it the screens run offline.</summary>
+    public OnlineClient? Online { get; init; }
+    public string StartScreen { get; init; } = "login";
     public string GameDirectory => Path.GetDirectoryName(Path.GetFullPath(dataDirectory).TrimEnd(Path.DirectorySeparatorChar))!;
 
     protected override void OnLoad()
@@ -43,11 +48,19 @@ public sealed class GlueGame(string dataDirectory, bool looseFiles, bool acceptA
             api.AcceptAgreements();
         api.QuitRequested = Exit;
         api.UrlRequested = url => Console.WriteLine($"LaunchURL: {url}");
-        api.LoginRequested = (account, _) =>
+        if (Online is { } online)
         {
-            Console.WriteLine($"Login as '{account}' to {api.GetCVar("realmList")} (no network client yet)");
-            _ui.FireEvent("OPEN_STATUS_DIALOG", "CANCEL", _ui.LocalizedText("LOGIN_STATE_CONNECTING"));
-        };
+            if (online.RealmList is { } realmList)
+                api.SetCVar("realmList", realmList);
+            _network = new GlueNetwork(api, online.Session, online.Data(_files)) { AutoEnterWorld = online.AutoEnterWorld && StartScreen == "login" };
+            _network.EnteredWorld += OnEnteredWorld;
+        }
+        else
+            api.LoginRequested = (account, _) =>
+            {
+                Console.WriteLine($"Login as '{account}' to {api.GetCVar("realmList")} (offline: pass --realmlist or use realmlist.wtf with --glue)");
+                _ui.FireEvent("OPEN_STATUS_DIALOG", "CANCEL", _ui.LocalizedText("LOGIN_STATE_CONNECTING"));
+            };
 
         _renderer = new GlueRenderer(Gl, _ui, source);
         var started = DateTime.UtcNow;
@@ -63,23 +76,82 @@ public sealed class GlueGame(string dataDirectory, bool looseFiles, bool acceptA
         _ui.TextMeasurer = _renderer.Measure;
         _ui.InvalidateLayout();
 
+        Hook(true);
+        switch (StartScreen)
+        {
+            case "charselect":
+                _ui.SetGlueScreen("charselect");
+                break;
+            case "disconnected":
+                _ui.FireEvent("DISCONNECTED_FROM_SERVER");
+                break;
+            case "login" when Online?.AutoLogin?.Split(':', 2) is [var account, var password]:
+                _network!.Login(account, password);
+                break;
+        }
+    }
+
+    private void Hook(bool attach)
+    {
         if (InputContext.Mice.FirstOrDefault() is { } mouse)
         {
-            mouse.MouseMove += (_, position) => _ui.MouseMove(ToUi(position));
-            mouse.MouseDown += (_, button) => _ui.MouseDown(ButtonName(button));
-            mouse.MouseUp += (_, button) => _ui.MouseUp(ButtonName(button));
-            mouse.Scroll += (_, wheel) => _ui.MouseWheel(wheel.Y);
+            if (attach)
+            {
+                mouse.MouseMove += OnMouseMove;
+                mouse.MouseDown += OnMouseDown;
+                mouse.MouseUp += OnMouseUp;
+                mouse.Scroll += OnScroll;
+            }
+            else
+            {
+                mouse.MouseMove -= OnMouseMove;
+                mouse.MouseDown -= OnMouseDown;
+                mouse.MouseUp -= OnMouseUp;
+                mouse.Scroll -= OnScroll;
+            }
         }
         if (InputContext.Keyboards.FirstOrDefault() is { } keyboard)
         {
-            keyboard.KeyDown += (_, key, _) => _ui.KeyDown(KeyName(key));
-            keyboard.KeyChar += (_, c) =>
+            if (attach)
             {
-                if (!char.IsControl(c))
-                    _ui.Char(c.ToString());
-            };
+                keyboard.KeyDown += OnKeyDown;
+                keyboard.KeyChar += OnKeyChar;
+            }
+            else
+            {
+                keyboard.KeyDown -= OnKeyDown;
+                keyboard.KeyChar -= OnKeyChar;
+            }
         }
-        Window.Resize += size => _ui.SetScreenSize(size.X, size.Y);
+        if (attach)
+            Window.Resize += OnResize;
+        else
+            Window.Resize -= OnResize;
+    }
+
+    private void OnMouseMove(IMouse _, Vector2 position) => _ui.MouseMove(ToUi(position));
+    private void OnMouseDown(IMouse _, MouseButton button) => _ui.MouseDown(ButtonName(button));
+    private void OnMouseUp(IMouse _, MouseButton button) => _ui.MouseUp(ButtonName(button));
+    private void OnScroll(IMouse _, ScrollWheel wheel) => _ui.MouseWheel(wheel.Y);
+    private void OnKeyDown(IKeyboard _, Key key, int __) => _ui.KeyDown(KeyName(key));
+    private void OnResize(Silk.NET.Maths.Vector2D<int> size) => _ui.SetScreenSize(size.X, size.Y);
+
+    private void OnKeyChar(IKeyboard _, char c)
+    {
+        if (!char.IsControl(c))
+            _ui.Char(c.ToString());
+    }
+
+    private void OnEnteredWorld(Net.WorldEntry entry)
+    {
+        var online = Online!;
+        if (online.Data(_files).Map((int)entry.Map) is { } map)
+            SwitchTo(online.World(map.Directory));
+        else
+        {
+            _ui.FireEvent("OPEN_STATUS_DIALOG", "OKAY", $"Map {entry.Map} is not in Map.dbc");
+            online.Session.Logout();
+        }
     }
 
     private Vector2 ToUi(Vector2 window)
@@ -98,7 +170,11 @@ public sealed class GlueGame(string dataDirectory, bool looseFiles, bool acceptA
     private static string KeyName(Key key) =>
         KeyNames.TryGetValue(key, out var name) ? name : key.ToString().ToUpperInvariant();
 
-    protected override void OnUpdate(float dt) => _ui.Update(dt);
+    protected override void OnUpdate(float dt)
+    {
+        Online?.Session.Poll();
+        _ui.Update(dt);
+    }
 
     protected override void OnRender(float dt)
     {
@@ -111,6 +187,12 @@ public sealed class GlueGame(string dataDirectory, bool looseFiles, bool acceptA
 
     protected override void OnUnload()
     {
+        Hook(false);
+        if (_network is { } network)
+        {
+            network.EnteredWorld -= OnEnteredWorld;
+            network.Dispose();
+        }
         _renderer.Dispose();
         _imgui.Dispose();
         _files.Dispose();

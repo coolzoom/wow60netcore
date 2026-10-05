@@ -1,4 +1,5 @@
 using System.Numerics;
+using Client.Online;
 using Client.Ui;
 using Client.World;
 using Engine;
@@ -40,12 +41,19 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
     private WorldScene? _scene;
     private CharacterController _player = null!;
     private bool _snapToGround;
+    private OnlineWorld? _online;
+    private InGameUi? _inGame;
+    private LoadingScreen? _loadingScreens;
+    private string? _loadingImage;
+    private bool _loading;
 
     public IReadOnlyList<MapEntry> Maps { get; private set; } = [];
     public WorldScene? Scene => _scene;
     public CharacterController Player => _player;
     public MpqFileSystem Files => _files;
     public AssetCache Assets => _assets;
+    public GL Graphics => Gl;
+    public OrbitCamera Camera => _camera;
     public bool Flying { get; set; }
     public bool FogEnabled { get; set; } = true;
     public float SpeedMultiplier { get; set; } = 1f;
@@ -63,6 +71,9 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
         set => Window.VSync = value;
     }
     public RenderSettings Settings { get; set; } = new();
+    /// <summary>Set when playing on a server: spawn, movement and the objects around come from the session.</summary>
+    public OnlineClient? Online { get; init; }
+    public OnlineWorld? OnlineWorld => _online;
 
     protected override void OnLoad()
     {
@@ -90,15 +101,89 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
         _playerBody = new Mesh(Gl, MeshData.Box(new(0.8f, 1.2f, 0.5f), new(0.70f, 0.20f, 0.18f)));
         _playerHead = new Mesh(Gl, MeshData.Box(new(0.5f, 0.5f, 0.5f), new(0.93f, 0.78f, 0.62f)));
 
-        _imgui = new ImGuiController(Gl, Window, InputContext, UiFont.Create(_files), () => ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard,
-            Options.UiScale, softKeyboard: Options.TouchControls);
+        if (Online is { } client)
+        {
+            // The interface is the client's own FrameXML; ImGui only rasterizes its fonts and draws its quads.
+            _inGame = new InGameUi(Gl, _files, null, client.Session, client.Gameplay, client.Text(_files), client.Data(_files))
+            {
+                StartScript = client.UiScript,
+            };
+            _imgui = new ImGuiController(Gl, Window, InputContext, null, _inGame.Renderer.ConfigureFonts, softKeyboard: Options.TouchControls);
+            _inGame.Ui.TextMeasurer = _inGame.Renderer.Measure;
+            _inGame.Ui.SetScreenSize(Window.Size.X, Window.Size.Y);
+            _inGame.Ui.InvalidateLayout();
+            _inGame.Attach(InputContext);
+            HookInGame(true);
+        }
+        else
+            _imgui = new ImGuiController(Gl, Window, InputContext, UiFont.Create(_files, allChinese: false),
+                () => ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard, Options.UiScale, softKeyboard: Options.TouchControls);
         _ui = new WorldUi(this, browseFilter);
+        _loadingScreens = new LoadingScreen(_files);
 
         var map = Maps.FirstOrDefault(m => m.Directory.Equals(mapDirectory, StringComparison.OrdinalIgnoreCase)) ?? Maps[0];
         LoadMap(map, spawnWorld is { } world ? WorldSpace.FromWorld(world) : null);
 
+        if (Online is { } online)
+        {
+            _online = new OnlineWorld(this, online.Session, online.Data(_files), online.Gameplay, online.Text(_files), _inGame!)
+            {
+                AutoFight = online.AutoFight,
+            };
+            _online.ExitRequested += screen => SwitchTo(online.Glue(screen));
+            if (online.Session.Location is { } location)
+                _player.SetFacing(location.Orientation);
+            Flying = false;
+        }
+
         Gl.Enable(EnableCap.DepthTest);
     }
+
+    private void HookInGame(bool attach)
+    {
+        if (InputContext.Mice.FirstOrDefault() is { } mouse)
+        {
+            if (attach)
+            {
+                mouse.MouseMove += OnMouseMove;
+                mouse.MouseDown += OnMouseDown;
+                mouse.MouseUp += OnMouseUp;
+            }
+            else
+            {
+                mouse.MouseMove -= OnMouseMove;
+                mouse.MouseDown -= OnMouseDown;
+                mouse.MouseUp -= OnMouseUp;
+            }
+        }
+        if (InputContext.Keyboards.FirstOrDefault() is { } keyboard)
+        {
+            if (attach)
+            {
+                keyboard.KeyDown += OnKeyDown;
+                keyboard.KeyUp += OnKeyUp;
+                keyboard.KeyChar += OnKeyChar;
+            }
+            else
+            {
+                keyboard.KeyDown -= OnKeyDown;
+                keyboard.KeyUp -= OnKeyUp;
+                keyboard.KeyChar -= OnKeyChar;
+            }
+        }
+        if (attach)
+            Window.Resize += OnResize;
+        else
+            Window.Resize -= OnResize;
+    }
+
+    private void OnMouseMove(IMouse _, Vector2 position) => _inGame!.MouseMove(position, new Vector2(Window.Size.X, Window.Size.Y));
+    private void OnMouseDown(IMouse _, MouseButton button) => _inGame!.MouseDown(button);
+    private void OnMouseUp(IMouse _, MouseButton button) => _inGame!.MouseUp(button);
+    private void OnKeyDown(IKeyboard _, Key key, int __) => _inGame!.KeyDown(key);
+    private void OnKeyUp(IKeyboard _, Key key, int __) => _inGame!.KeyUp(key);
+    private void OnKeyChar(IKeyboard _, char c) => _inGame!.Char(c);
+    private void OnResize(Silk.NET.Maths.Vector2D<int> size) => _inGame!.Ui.SetScreenSize(size.X, size.Y);
 
     public void LoadMap(MapEntry map, Vector3? spawn = null)
     {
@@ -107,6 +192,8 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
         var position = spawn ?? _scene.DefaultSpawn();
         _player = new CharacterController(_scene, position);
         _snapToGround = true;
+        _loading = true;
+        _loadingImage = _loadingScreens?.ImageFor(map.Id);
         _camera.MinHeightAt = (x, z) =>
             _scene.TryGetHeight(new Vector3(x, _player.Position.Y + 2f, z), out var h) ? h : float.MinValue;
     }
@@ -133,6 +220,8 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
 
     protected override void OnUpdate(float dt)
     {
+        _online?.Poll();
+        _inGame?.Update(dt);
         var scene = _scene!;
         scene.Settings = Settings;
         scene.Update(_player.Position);
@@ -148,26 +237,26 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
             {
                 _player.Teleport(_player.Position);
                 _snapToGround = false;
+                _loading = false;
             }
             _camera.Target = _player.Position + new Vector3(0, 1.6f, 0);
             return;
         }
 
         var io = ImGui.GetIO();
-        if (!io.WantCaptureMouse)
+        var uiMouse = _inGame?.OwnsMouse ?? io.WantCaptureMouse;
+        if (!uiMouse && (Input.IsMouseDown(MouseButton.Right) || Input.IsMouseDown(MouseButton.Left)))
         {
-            if (Input.IsMouseDown(MouseButton.Right) || Input.IsMouseDown(MouseButton.Left))
-            {
-                _camera.Yaw -= Input.MouseDelta.X * MouseSensitivity;
-                _camera.Pitch += Input.MouseDelta.Y * MouseSensitivity;
-            }
-            _camera.Distance -= Input.ScrollDelta * 2f;
+            _camera.Yaw -= Input.MouseDelta.X * MouseSensitivity;
+            _camera.Pitch += Input.MouseDelta.Y * MouseSensitivity;
         }
+        if (Input.ScrollDelta != 0 && !(_inGame?.MouseWheel(Input.ScrollDelta) ?? io.WantCaptureMouse))
+            _camera.Distance -= Input.ScrollDelta * 2f;
 
         var move = Vector2.Zero;
         var vertical = 0f;
         var jump = false;
-        if (!io.WantCaptureKeyboard)
+        if (!(_inGame?.TextInput ?? io.WantCaptureKeyboard))
         {
             if (Input.IsKeyDown(Key.Q)) _camera.Yaw += KeyTurnSpeed * dt;
             if (Input.IsKeyDown(Key.E)) _camera.Yaw -= KeyTurnSpeed * dt;
@@ -178,10 +267,17 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
             vertical = (Input.IsKeyDown(Key.Space) ? 1 : 0) - (Input.IsKeyDown(Key.ShiftLeft) || Input.IsKeyDown(Key.X) ? 1 : 0);
         }
         move = Vector2.Clamp(move + TouchMove, -Vector2.One, Vector2.One);
+        if (_online?.AutoFightStep() is { } yaw)
+        {
+            _camera.Yaw = yaw;
+            move = Vector2.UnitY;
+        }
         vertical = Math.Clamp(vertical + TouchVertical, -1f, 1f);
         jump |= TouchJump;
 
-        _player.Update(dt, new CharacterInput(move, jump, vertical, Flying, SpeedMultiplier), _camera.Forward, _camera.Right);
+        var speed = SpeedMultiplier * (_online?.SpeedScale ?? 1f);
+        _player.Update(dt, new CharacterInput(move, jump, vertical, Flying, speed), _camera.Forward, _camera.Right);
+        _online?.SyncMovement(_player);
         _camera.Target = _player.Position + new Vector3(0, 1.6f, 0);
     }
 
@@ -207,18 +303,35 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
         }
 
         _scene!.Render(_terrainShader, _modelShader, _unlitShader, _camera.Position, new Frustum(view * projection));
-        DrawPlayer();
+        if (_online is { } online)
+            online.Render(_scene, _modelShader, DrawBox);
+        else
+            DrawBox(_player.Position, _player.Facing);
 
         _imgui.Update(dt);
-        _ui.Draw(dt);
+        var window = new Vector2(Window.Size.X, Window.Size.Y);
+        if (_inGame is { } inGame)
+        {
+            _online?.DrawWorldText(view * projection, window, _camera.Position, inGame.Mouse);
+            inGame.Draw(window, dt);
+        }
+        else
+            _ui.Draw(dt);
+        if (_loading)
+        {
+            var stats = _scene.Stats;
+            var progress = stats.Tiles / (float)Math.Max(1, stats.Tiles + stats.PendingTiles) * 0.9f + (_assets.PendingCount == 0 ? 0.1f : 0f);
+            LoadingScreen.Draw(_assets, _loadingImage, new Vector2(Window.Size.X, Window.Size.Y), progress, _scene.Map.Name);
+        }
         _imgui.Render();
     }
 
-    private void DrawPlayer()
+    /// <summary>Stand-in figure for the offline player and for units whose model is not available.</summary>
+    private void DrawBox(Vector3 position, float facing)
     {
         _litShader.Use();
         _litShader.Set("uAlpha", 1f);
-        var root = Matrix4x4.CreateRotationY(_player.Facing) * Matrix4x4.CreateTranslation(_player.Position);
+        var root = Matrix4x4.CreateRotationY(facing) * Matrix4x4.CreateTranslation(position);
         _litShader.Set("uModel", Matrix4x4.CreateTranslation(0, 0.6f, 0) * root);
         _playerBody.Draw();
         _litShader.Set("uModel", Matrix4x4.CreateTranslation(0, 1.45f, 0) * root);
@@ -227,6 +340,12 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
 
     protected override void OnUnload()
     {
+        _online?.Dispose();
+        if (_inGame is not null)
+        {
+            HookInGame(false);
+            _inGame.Dispose();
+        }
         _imgui.Dispose();
         _scene?.Dispose();
         _assets.Dispose();

@@ -304,6 +304,50 @@ public sealed class WorldScene : IHeightField, IDisposable
         _gl.Disable(EnableCap.Blend);
     }
 
+    /// <summary>
+    /// Draws a model that is not part of the map (creatures, players, game objects). Replaceable textures come from
+    /// <paramref name="skin"/> by texture type; <paramref name="showGeoset"/> hides unused character submeshes.
+    /// Returns false while the model is still loading or missing.
+    /// </summary>
+    public bool DrawActor(Shader modelShader, string model, Matrix4x4 transform, Func<int, string?>? skin = null, Func<int, bool>? showGeoset = null,
+        Mesh? posed = null) =>
+        DrawActor(modelShader, model, transform, skin is null ? null : type => skin(type) is { } name ? _assets.Texture(name) : null, showGeoset, posed);
+
+    /// <summary>Draws a model; <paramref name="skin"/> supplies textures for replaceable texture types (body, hair, cape, creature skins).</summary>
+    public bool DrawActor(Shader modelShader, string model, Matrix4x4 transform, Func<int, Engine.Rendering.Texture?>? skin, Func<int, bool>? showGeoset,
+        Mesh? posed)
+    {
+        if (_assets.Model(model) is not { } gpu)
+            return false;
+        var mesh = posed ?? gpu.Mesh;
+        modelShader.Use();
+        modelShader.Set("uModel", transform);
+        foreach (var pass in new[] { false, true })
+        {
+            if (pass)
+            {
+                _gl.Enable(EnableCap.Blend);
+                _gl.DepthMask(false);
+            }
+            foreach (var batch in gpu.Data.Batches)
+            {
+                var transparent = batch.Blend is BlendMode.Alpha or BlendMode.Additive;
+                if (transparent != pass || showGeoset?.Invoke(batch.Geoset) == false)
+                    continue;
+                if (pass)
+                    _gl.BlendFunc(BlendingFactor.SrcAlpha, batch.Blend == BlendMode.Additive ? BlendingFactor.One : BlendingFactor.OneMinusSrcAlpha);
+                modelShader.Set("uAlphaTest", pass ? 0.01f : batch.Blend == BlendMode.AlphaKey ? 0.5f : -1f);
+                var texture = batch.Texture is { } name ? _assets.Texture(name) : batch.TextureType != 0 ? skin?.Invoke(batch.TextureType) : null;
+                (texture ?? _assets.Fallback).Bind(0);
+                mesh.DrawRange(batch.IndexStart, batch.IndexCount);
+                _drawCalls++;
+            }
+        }
+        _gl.DepthMask(true);
+        _gl.Disable(EnableCap.Blend);
+        return true;
+    }
+
     private void RenderTerrain(Shader shader, Frustum frustum)
     {
         shader.Use();

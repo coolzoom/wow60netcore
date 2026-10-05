@@ -103,6 +103,23 @@ public sealed class LuaBindings
     private void Def<T>(string name, Action<T, LuaArgs> method) where T : UiObject =>
         Def<T>(name, (obj, args) => { method(obj, args); return DynValue.Nil; });
 
+    /// <summary>
+    /// Adds or replaces a method of a widget type from outside (the in-game API fills tooltips, minimap zoom and so
+    /// on); method tables already built for that type and its subtypes get it too.
+    /// </summary>
+    public void Define<T>(string name, Func<T, LuaArgs, DynValue> method) where T : UiObject
+    {
+        Def(name, method);
+        foreach (var (type, meta) in _metatables)
+            if (typeof(T).IsAssignableFrom(type) && meta.Get("__index").Table is { } methods)
+                methods[name] = DynValue.NewCallback((_, args) =>
+                {
+                    if (args.Count == 0 || ObjectOf(args[0]) is not T self)
+                        throw new ScriptRuntimeException($"Usage: obj:{name}(...) called without a valid object");
+                    return method(self, new LuaArgs(args, 1));
+                }, name);
+    }
+
     private Table Metatable(Type type)
     {
         if (_metatables.TryGetValue(type, out var meta))
@@ -324,11 +341,18 @@ public sealed class LuaBindings
         Def<Frame>("SetResizable", (f, a) => f.Resizable = a.Bool(0));
         Def<Frame>("IsResizable", (f, _) => B(f.Resizable));
         Def<Frame>("SetClampedToScreen", (f, a) => f.ClampedToScreen = a.Bool(0));
-        Def<Frame>("RegisterForDrag", (_, _) => { });
+        Def<Frame>("RegisterForDrag", (f, a) =>
+        {
+            f.DragButtons.Clear();
+            for (var i = 0; i < a.Count; i++)
+                if (a.Str(i) is { } button)
+                    f.DragButtons.Add(button);
+        });
         Def<Frame>("StartMoving", (_, _) => { });
         Def<Frame>("StartSizing", (_, _) => { });
         Def<Frame>("StopMovingOrSizing", (_, _) => { });
         Def<Frame>("SetUserPlaced", (_, _) => { });
+        Def<Frame>("IsUserPlaced", (_, _) => DynValue.Nil);
         Def<Frame>("SetMinResize", (_, _) => { });
         Def<Frame>("SetMaxResize", (_, _) => { });
         Def<Frame>("SetHitRectInsets", (f, a) => f.HitRectInsets = new Vector4(a.F(0), a.F(1), a.F(2), a.F(3)));
@@ -411,6 +435,15 @@ public sealed class LuaBindings
         Def<Button>("GetFontString", (b, _) => O(b.TextString));
         Def<Button>("GetTextFontString", (b, _) => O(b.TextString));
         Def<Button>("SetFontString", (b, a) => { if (ObjectOf<FontString>(a[0]) is { } fs) b.TextString = fs; });
+        Def<Button>("SetFont", (b, a) =>
+        {
+            if (b.TextString is not { } text)
+                return DynValue.Nil;
+            text.Font.File = a.Str(0) is { } file ? UiPath.Normalize(file) : text.Font.File;
+            text.Font.Height = a.F(1, text.Font.Height);
+            _ui.InvalidateLayout();
+            return B(true);
+        });
         Def<Button>("SetTextColor", (b, a) => b.NormalColor = ColorArgs(a, 0));
         Def<Button>("SetDisabledTextColor", (b, a) => b.DisabledColor = ColorArgs(a, 0));
         Def<Button>("SetHighlightTextColor", (b, a) => b.HighlightColor = ColorArgs(a, 0));
@@ -426,7 +459,13 @@ public sealed class LuaBindings
         Def<Button>("UnlockHighlight", (b, _) => b.HighlightLocked = false);
         Def<Button>("SetButtonState", (b, a) => b.Pushed = (a.Str(0) ?? "").Equals("PUSHED", StringComparison.OrdinalIgnoreCase));
         Def<Button>("GetButtonState", (b, _) => S(b.ButtonState));
-        Def<Button>("RegisterForClicks", (_, _) => { });
+        Def<Button>("RegisterForClicks", (b, a) =>
+        {
+            b.ClickButtons.Clear();
+            for (var i = 0; i < a.Count; i++)
+                if (a.Str(i) is { } button)
+                    b.ClickButtons.Add(button.EndsWith("Up", StringComparison.Ordinal) ? button[..^2] : button.EndsWith("Down", StringComparison.Ordinal) ? button[..^4] : button);
+        });
         Def<Button>("SetNormalTexture", (b, a) => b.NormalTexture = TextureArg(b, a, b.NormalTexture, DrawLayer.Artwork));
         Def<Button>("SetPushedTexture", (b, a) => b.PushedTexture = TextureArg(b, a, b.PushedTexture, DrawLayer.Artwork));
         Def<Button>("SetDisabledTexture", (b, a) => b.DisabledTexture = TextureArg(b, a, b.DisabledTexture, DrawLayer.Artwork));
@@ -554,16 +593,29 @@ public sealed class LuaBindings
         Def<Model>("GetPosition", (_, _) => Tuple(N(0), N(0), N(0)));
         foreach (var name in ModelNoOps)
             Def<Model>(name, (_, _) => { });
+        Def<Model>("SetSequence", (m, a) => m.Sequence = a.Int(0));
 
         Def<MessageFrame>("AddMessage", (m, a) => m.AddMessage(a.Str(0) ?? "", new Color4(a.F(1, 1), a.F(2, 1), a.F(3, 1))));
-        Def<MessageFrame>("Clear", (m, _) => m.Messages.Clear());
+        Def<MessageFrame>("Clear", (m, _) => { m.Messages.Clear(); m.ScrollOffset = 0; });
         Def<MessageFrame>("GetNumMessages", (m, _) => N(m.Messages.Count));
         Def<MessageFrame>("SetMaxLines", (m, a) => m.MaxLines = a.Int(0, 120));
+        Def<MessageFrame>("GetMaxLines", (m, _) => N(m.MaxLines));
         Def<MessageFrame>("SetFontObject", (m, a) => m.FontString.SetFontObject(ObjectOf<FontObject>(a[0])));
         Def<MessageFrame>("SetJustifyH", (m, a) => m.FontString.Font.JustifyH = (a.Str(0) ?? "CENTER").ToUpperInvariant());
-        Def<MessageFrame>("AtBottom", (_, _) => B(true));
-        Def<MessageFrame>("AtTop", (_, _) => B(true));
-        foreach (var name in new[] { "SetFading", "SetTimeVisible", "SetFadeDuration", "ScrollUp", "ScrollDown", "ScrollToTop", "ScrollToBottom", "PageUp", "PageDown", "SetInsertMode", "UpdateColorByID" })
+        Def<MessageFrame>("SetFading", (m, a) => m.Fading = a.Count == 0 || a.Bool(0));
+        Def<MessageFrame>("GetFading", (m, _) => B(m.Fading));
+        Def<MessageFrame>("SetTimeVisible", (m, a) => m.TimeVisible = a.F(0, 10));
+        Def<MessageFrame>("GetTimeVisible", (m, _) => N(m.TimeVisible));
+        Def<MessageFrame>("SetFadeDuration", (m, a) => m.FadeDuration = a.F(0, 3));
+        Def<MessageFrame>("AtBottom", (m, _) => B(m.ScrollOffset == 0));
+        Def<MessageFrame>("AtTop", (m, _) => B(m.ScrollOffset >= m.Messages.Count - 1));
+        Def<MessageFrame>("ScrollUp", (m, _) => m.ScrollOffset = Math.Min(m.ScrollOffset + 1, Math.Max(0, m.Messages.Count - 1)));
+        Def<MessageFrame>("ScrollDown", (m, _) => m.ScrollOffset = Math.Max(0, m.ScrollOffset - 1));
+        Def<MessageFrame>("PageUp", (m, _) => m.ScrollOffset = Math.Min(m.ScrollOffset + 10, Math.Max(0, m.Messages.Count - 1)));
+        Def<MessageFrame>("PageDown", (m, _) => m.ScrollOffset = Math.Max(0, m.ScrollOffset - 10));
+        Def<MessageFrame>("ScrollToTop", (m, _) => m.ScrollOffset = Math.Max(0, m.Messages.Count - 1));
+        Def<MessageFrame>("ScrollToBottom", (m, _) => m.ScrollOffset = 0);
+        foreach (var name in new[] { "SetInsertMode", "UpdateColorByID", "SetScrollFromBottom" })
             Def<MessageFrame>(name, (_, _) => { });
 
         Def<SimpleHtml>("SetText", (h, a) => h.SetText(a.Str(0) ?? ""));
@@ -572,14 +624,33 @@ public sealed class LuaBindings
         Def<SimpleHtml>("SetHyperlinkFormat", (_, _) => { });
         Def<SimpleHtml>("SetSpacing", (_, _) => { });
 
-        Def<GameTooltip>("SetOwner", (t, a) => { t.Owner = ObjectOf<Frame>(a[0]); t.Lines.Clear(); });
+        Def<GameTooltip>("SetOwner", (t, a) => t.SetOwner(ObjectOf<Frame>(a[0]), a.Str(1), a.F(2), a.F(3)));
         Def<GameTooltip>("IsOwned", (t, a) => B(t.Owner == ObjectOf<Frame>(a[0])));
         Def<GameTooltip>("GetOwner", (t, _) => O(t.Owner));
-        Def<GameTooltip>("ClearLines", (t, _) => t.Lines.Clear());
+        Def<GameTooltip>("GetAnchorType", (t, _) => S(t.Anchor));
+        Def<GameTooltip>("ClearLines", (t, _) => t.ClearLines());
         Def<GameTooltip>("NumLines", (t, _) => N(t.Lines.Count));
-        Def<GameTooltip>("SetText", (t, a) => { t.Lines.Clear(); t.Lines.Add((a.Str(0) ?? "", null, new Color4(a.F(1, 1), a.F(2, 0.82f), a.F(3, 0)))); });
-        Def<GameTooltip>("AddLine", (t, a) => t.Lines.Add((a.Str(0) ?? "", null, new Color4(a.F(1, 1), a.F(2, 0.82f), a.F(3, 0)))));
-        Def<GameTooltip>("AddDoubleLine", (t, a) => t.Lines.Add((a.Str(0) ?? "", a.Str(1), new Color4(a.F(2, 1), a.F(3, 0.82f), a.F(4, 0)))));
+        Def<GameTooltip>("SetText", (t, a) =>
+        {
+            t.Lines.Clear();
+            t.AddLine(a.Str(0) ?? "", null, new Color4(a.F(1, 1), a.F(2, 0.82f), a.F(3, 0), a.F(4, 1)), Color4.White, a.Bool(5));
+        });
+        Def<GameTooltip>("AddLine", (t, a) => t.AddLine(a.Str(0) ?? "", null, new Color4(a.F(1, 1), a.F(2, 0.82f), a.F(3, 0)), Color4.White, a.Bool(4)));
+        Def<GameTooltip>("AddDoubleLine", (t, a) => t.AddLine(a.Str(0) ?? "", a.Str(1),
+            new Color4(a.F(2, 1), a.F(3, 0.82f), a.F(4, 0)), new Color4(a.F(5, 1), a.F(6, 0.82f), a.F(7, 0))));
+        Def<GameTooltip>("AppendText", (t, a) =>
+        {
+            if (t.Lines.Count == 0)
+                return;
+            var first = t.Lines[0];
+            t.Lines[0] = first with { Left = first.Left + (a.Str(0) ?? "") };
+            t.Layout();
+        });
+        Def<GameTooltip>("SetMinimumWidth", (t, a) => { t.MinimumWidth = a.F(0); t.Layout(); });
+        Def<GameTooltip>("Show", (t, _) => { t.Layout(); t.Show(); });
+        Def<GameTooltip>("FadeOut", (t, _) => t.Hide());
+        Def<GameTooltip>("SetPadding", (_, _) => { });
+        Def<GameTooltip>("AddTexture", (_, _) => { });
 
         Def<ColorSelect>("SetColorRGB", (_, _) => { });
         Def<ColorSelect>("GetColorRGB", (_, _) => Tuple(N(1), N(1), N(1)));

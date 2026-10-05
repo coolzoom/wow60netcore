@@ -25,6 +25,20 @@ public sealed class LuaEngine
         function table.foreachi(t, f)
             for i = 1, table.getn(t) do local r = f(i, t[i]) if r ~= nil then return r end end
         end
+        do
+            local insert = table.insert
+            function table.insert(t, ...)
+                local n = select("#", ...)
+                if n >= 2 then
+                    local pos, value = ...
+                    if type(pos) == "number" and pos > table.getn(t) + 1 then
+                        t[pos] = value
+                        return
+                    end
+                end
+                return insert(t, ...)
+            end
+        end
         string.gfind = string.gmatch
         math.mod = math.fmod
         math.log10 = math.log10 or function(x) return math.log(x, 10) end

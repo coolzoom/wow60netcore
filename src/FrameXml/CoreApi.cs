@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Xml.Linq;
 using FrameXml.Lua;
 using FrameXml.Objects;
@@ -12,7 +11,6 @@ internal static class CoreApi
 {
     public static void Register(UiScreen ui)
     {
-        var clock = Stopwatch.StartNew();
         Fn(ui, "CreateFrame", a =>
         {
             var node = new XElement(a.Str(0) ?? "Frame");
@@ -22,7 +20,7 @@ internal static class CoreApi
         });
         Fn(ui, "debuginfo", _ => DynValue.Nil);
         Fn(ui, "FrameXML_Debug", a => { ui.Loader.Verbose = a.Bool(0) && a.Num(0, 1) != 0; return DynValue.Nil; });
-        Fn(ui, "GetTime", _ => N(clock.Elapsed.TotalSeconds));
+        Fn(ui, "GetTime", _ => N(ui.Time));
         Fn(ui, "GetScreenWidth", _ => N(ui.Width));
         Fn(ui, "GetScreenHeight", _ => N(ui.Height));
         Fn(ui, "GetCursorPosition", _ => Tuple(N(ui.MousePosition.X), N(ui.MousePosition.Y)));

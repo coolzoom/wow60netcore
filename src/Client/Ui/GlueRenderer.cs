@@ -36,6 +36,12 @@ public sealed class GlueRenderer : IDisposable
         _files = files;
     }
 
+    /// <summary>Also rasterize the ~2500 common Chinese characters (in-game chat and names can use any of them).</summary>
+    public bool CommonChinese { get; init; }
+
+    /// <summary>The font of a FontObject (e.g. "GameFontNormal"), for text the engine draws in the world.</summary>
+    public ImFontPtr FontOf(string fontObject) => Font(_ui.FindFont(fontObject)?.Font ?? new FontInfo());
+
     /// <summary>Font files referenced by Font objects and font strings; call before the ImGui font atlas is built.</summary>
     public void CollectFonts()
     {
@@ -60,6 +66,8 @@ public sealed class GlueRenderer : IDisposable
 
         var builder = new ImFontGlyphRangesBuilderPtr(ImGuiNative.ImFontGlyphRangesBuilder_ImFontGlyphRangesBuilder());
         builder.AddRanges(io.Fonts.GetGlyphRangesDefault());
+        if (CommonChinese)
+            builder.AddRanges(io.Fonts.GetGlyphRangesChineseSimplifiedCommon());
         builder.AddText(UiText());
         builder.BuildRanges(out var ranges);
 
@@ -134,6 +142,15 @@ public sealed class GlueRenderer : IDisposable
         }
     }
 
+    /// <summary>An icon held on the cursor (a dragged item or spell), drawn above the interface.</summary>
+    public void DrawCursorIcon(string file, Vector2 windowPosition)
+    {
+        if (_ui.ResolveTexture(file) is not { } path || Load(path, BlendMode.Blend) is not { } gpu)
+            return;
+        var size = new Vector2(32 * _scale);
+        ImGui.GetForegroundDrawList().AddImage((IntPtr)gpu.Handle, windowPosition - size / 2, windowPosition + size / 2);
+    }
+
     private (Vector2 Min, Vector2 Max)? ClipRect(Frame frame)
     {
         for (var child = frame; child.Parent is { } parent; child = parent)
@@ -180,9 +197,67 @@ public sealed class GlueRenderer : IDisposable
                 DrawText(list, html.PlainText.Trim(), html.FontString.Font, rect, html.EffectiveAlpha, wrap: true);
                 break;
             case MessageFrame messages when messages.Messages.Count > 0:
-                DrawText(list, string.Join("\n", messages.Messages.Select(m => m.Text)), messages.FontString.Font, rect, messages.EffectiveAlpha, wrap: true);
+                DrawMessages(list, messages, rect);
+                break;
+            case Model { Sequence: 0 } model when model.Table.Get("duration").CastToNumber() is > 0 and var duration &&
+                                                  model.Table.Get("start").CastToNumber() is { } start:
+                DrawCooldown(list, rect, (float)((_ui.Time - start) / duration), model.EffectiveAlpha);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Message lines in their own colours, fading with age. Scrolling message frames (chat) stack the newest line at
+    /// the bottom and go up; plain message frames (UIErrorsFrame) put the newest line at the top.
+    /// </summary>
+    private void DrawMessages(ImDrawListPtr list, MessageFrame frame, UiRect rect)
+    {
+        var font = frame.FontString.Font;
+        var height = (font.Height > 0 ? font.Height : 12) + font.Spacing;
+        var fromBottom = frame is ScrollingMessageFrame;
+        var y = fromBottom ? rect.Bottom : rect.Top;
+        list.PushClipRect(ToScreen(rect.Left, rect.Top), ToScreen(rect.Right, rect.Bottom), true);
+        for (var i = frame.Messages.Count - 1 - (fromBottom ? frame.ScrollOffset : 0); i >= 0; i--)
+        {
+            var message = frame.Messages[i];
+            var alpha = frame.MessageAlpha(message) * frame.EffectiveAlpha;
+            var lines = Layout(message.Text, font, rect.Width);
+            var block = lines.Count * height;
+            if (fromBottom ? y + block > rect.Top + height : y - block < rect.Bottom - height)
+                break;
+            if (alpha > 0.01f)
+            {
+                var style = font.Clone();
+                style.Color = message.Color with { A = font.Color.A };
+                style.JustifyV = "TOP";
+                var top = fromBottom ? y + block : y;
+                DrawText(list, string.Join("\n", lines), style, new UiRect(rect.Left, top - block, rect.Right, top), alpha, wrap: false);
+            }
+            y += fromBottom ? block : -block;
+        }
+        list.PopClipRect();
+    }
+
+    /// <summary>The cooldown sweep: the part of the button still cooling down is darkened, clockwise from 12 o'clock.</summary>
+    private void DrawCooldown(ImDrawListPtr list, UiRect rect, float done, float alpha)
+    {
+        if (done is < 0 or >= 1)
+            return;
+        var min = ToScreen(rect.Left, rect.Top);
+        var max = ToScreen(rect.Right, rect.Bottom);
+        var center = (min + max) / 2;
+        var radius = Vector2.Distance(min, max) / 2;
+        var color = Pack(new Color4(0, 0, 0, 0.65f), alpha);
+        list.PushClipRect(min, max, true);
+        var from = -MathF.PI / 2 + done * MathF.Tau;
+        var to = MathF.PI * 1.5f;
+        for (var a = from; a < to; a += MathF.PI / 2)
+        {
+            list.PathLineTo(center);
+            list.PathArcTo(center, radius, a, Math.Min(a + MathF.PI / 2, to), 12);
+            list.PathFillConvex(color);
+        }
+        list.PopClipRect();
     }
 
     private void DrawTexture(ImDrawListPtr list, UiTexture texture)

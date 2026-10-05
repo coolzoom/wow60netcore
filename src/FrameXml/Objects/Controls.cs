@@ -10,6 +10,9 @@ public class Button : Frame
 
     public Button(UiScreen ui) : base(ui) => MouseEnabled = true;
 
+    /// <summary>Mouse buttons whose release clicks the button (RegisterForClicks); left only by default.</summary>
+    public HashSet<string> ClickButtons { get; } = new(StringComparer.OrdinalIgnoreCase) { "LeftButton" };
+
     public Texture? NormalTexture { get; set; }
     public Texture? PushedTexture { get; set; }
     public Texture? DisabledTexture { get; set; }

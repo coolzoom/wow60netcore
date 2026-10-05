@@ -39,6 +39,8 @@ public sealed class CharacterController
         IsGrounded = true;
     }
 
+    public void SetFacing(float facing) => Facing = facing;
+
     public void Update(float dt, CharacterInput input, Vector3 forward, Vector3 right)
     {
         var position = Position;

@@ -4,6 +4,7 @@
     <Project Path="src/Engine/Engine.csproj" />
     <Project Path="src/Formats/Formats.csproj" />
     <Project Path="src/FrameXml/FrameXml.csproj" />
+    <Project Path="src/Net/Net.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Engine.Tests/Engine.Tests.csproj" />

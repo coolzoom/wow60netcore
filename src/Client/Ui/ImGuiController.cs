@@ -51,6 +51,7 @@ public sealed class ImGuiController : IDisposable
     private readonly GL _gl;
     private readonly IView _view;
     private readonly IKeyboard? _keyboard;
+    private readonly IMouse[] _mice;
     private readonly bool _softKeyboard;
     private readonly Shader _shader;
     private readonly Texture _fontTexture;
@@ -104,19 +105,20 @@ public sealed class ImGuiController : IDisposable
             gl.EnableVertexAttribArray(i);
         gl.BindVertexArray(0);
 
-        foreach (var mouse in input.Mice)
+        _mice = input.Mice.ToArray();
+        foreach (var mouse in _mice)
         {
-            mouse.MouseMove += (_, position) => ImGui.GetIO().AddMousePosEvent(position.X, position.Y);
-            mouse.MouseDown += (_, button) => MouseButtonEvent(button, true);
-            mouse.MouseUp += (_, button) => MouseButtonEvent(button, false);
-            mouse.Scroll += (_, wheel) => ImGui.GetIO().AddMouseWheelEvent(wheel.X, wheel.Y);
+            mouse.MouseMove += OnMouseMove;
+            mouse.MouseDown += OnMouseDown;
+            mouse.MouseUp += OnMouseUp;
+            mouse.Scroll += OnScroll;
         }
         _keyboard = input.Keyboards.FirstOrDefault();
         if (_keyboard is not null)
         {
-            _keyboard.KeyDown += (_, key, _) => KeyEvent(key, true);
-            _keyboard.KeyUp += (_, key, _) => KeyEvent(key, false);
-            _keyboard.KeyChar += (_, c) => ImGui.GetIO().AddInputCharacter(c);
+            _keyboard.KeyDown += OnKeyDown;
+            _keyboard.KeyUp += OnKeyUp;
+            _keyboard.KeyChar += OnKeyChar;
         }
 
         BeginFrame(1f / 60f);
@@ -296,8 +298,29 @@ public sealed class ImGuiController : IDisposable
         _ => null,
     };
 
+    private void OnMouseMove(IMouse _, System.Numerics.Vector2 position) => ImGui.GetIO().AddMousePosEvent(position.X, position.Y);
+    private void OnMouseDown(IMouse _, MouseButton button) => MouseButtonEvent(button, true);
+    private void OnMouseUp(IMouse _, MouseButton button) => MouseButtonEvent(button, false);
+    private void OnScroll(IMouse _, ScrollWheel wheel) => ImGui.GetIO().AddMouseWheelEvent(wheel.X, wheel.Y);
+    private void OnKeyDown(IKeyboard _, Key key, int __) => KeyEvent(key, true);
+    private void OnKeyUp(IKeyboard _, Key key, int __) => KeyEvent(key, false);
+    private void OnKeyChar(IKeyboard _, char c) => ImGui.GetIO().AddInputCharacter(c);
+
     public void Dispose()
     {
+        foreach (var mouse in _mice)
+        {
+            mouse.MouseMove -= OnMouseMove;
+            mouse.MouseDown -= OnMouseDown;
+            mouse.MouseUp -= OnMouseUp;
+            mouse.Scroll -= OnScroll;
+        }
+        if (_keyboard is not null)
+        {
+            _keyboard.KeyDown -= OnKeyDown;
+            _keyboard.KeyUp -= OnKeyUp;
+            _keyboard.KeyChar -= OnKeyChar;
+        }
         _gl.DeleteBuffer(_vbo);
         _gl.DeleteBuffer(_ebo);
         _gl.DeleteVertexArray(_vao);

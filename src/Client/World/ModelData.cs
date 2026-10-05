@@ -6,7 +6,7 @@ using Formats.Terrain;
 
 namespace Client.World;
 
-public sealed record ModelBatchData(int IndexStart, int IndexCount, string? Texture, BlendMode Blend);
+public sealed record ModelBatchData(int IndexStart, int IndexCount, string? Texture, BlendMode Blend, int TextureType = 0, int Geoset = 0);
 
 /// <summary>Render-ready vertex/index buffers for an M2 or WMO, built off the main thread.</summary>
 public sealed class ModelData
@@ -18,6 +18,8 @@ public sealed class ModelData
     public required float Radius { get; init; }
     /// <summary>Walkable surfaces in model space (render axes); only built for WMOs.</summary>
     public CollisionMesh? Collision { get; init; }
+    /// <summary>M2 attachment points by id: the bone they follow and their bind-pose position (render axes).</summary>
+    public IReadOnlyDictionary<int, (int Bone, Vector3 Position)> Attachments { get; init; } = new Dictionary<int, (int, Vector3)>();
 
     public static ModelData FromM2(M2Model model)
     {
@@ -25,8 +27,16 @@ public sealed class ModelData
         for (var i = 0; i < model.Positions.Length; i++)
             Write(vertices, i, model.Positions[i], model.Normals[i], model.TexCoords[i], Vector4.One);
 
-        var batches = model.Batches.Select(b => new ModelBatchData(b.IndexStart, b.IndexCount, b.Texture, b.Blend)).ToList();
-        return Build(vertices, model.Indices.Select(i => (uint)i).ToArray(), batches, model.Positions);
+        var batches = model.Batches.Select(b => new ModelBatchData(b.IndexStart, b.IndexCount, b.Texture, b.Blend, b.TextureType, b.Geoset)).ToList();
+        var data = Build(vertices, model.Indices.Select(i => (uint)i).ToArray(), batches, model.Positions);
+        var attachments = new Dictionary<int, (int, Vector3)>();
+        foreach (var a in model.Attachments)
+            attachments.TryAdd(a.Id, (a.Bone, WorldSpace.ModelToRender(a.Position)));
+        return new ModelData
+        {
+            Vertices = data.Vertices, Indices = data.Indices, Batches = data.Batches, Center = data.Center, Radius = data.Radius,
+            Attachments = attachments,
+        };
     }
 
     public static ModelData FromWmo(WmoModel model)

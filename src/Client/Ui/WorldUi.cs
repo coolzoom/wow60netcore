@@ -139,9 +139,19 @@ public sealed class WorldUi(WorldGame game, string? initialFilter = null)
 
     private void DrawWorldWindow()
     {
-        ImGui.SetNextWindowPos(new Vector2(10, 10) * Scale, ImGuiCond.FirstUseEver);
+        if (game.Online is not null)
+        {
+            // Out of the way of the unit frames and chat; still available for debugging.
+            var viewport = ImGui.GetMainViewport();
+            ImGui.SetNextWindowPos(viewport.WorkPos + new Vector2(viewport.WorkSize.X - 10, 110 * Scale), ImGuiCond.Once, new Vector2(1, 0));
+            ImGui.SetNextWindowCollapsed(true, ImGuiCond.Once);
+        }
+        else
+        {
+            ImGui.SetNextWindowPos(new Vector2(10, 10) * Scale, ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowCollapsed(Touch, ImGuiCond.FirstUseEver);
+        }
         ImGui.SetNextWindowSize(new Vector2(330, 0) * Scale, ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowCollapsed(Touch, ImGuiCond.FirstUseEver);
         if (!ImGui.Begin("世界"))
         {
             ImGui.End();
@@ -223,9 +233,18 @@ public sealed class WorldUi(WorldGame game, string? initialFilter = null)
 
     private void DrawFileBrowser()
     {
-        ImGui.SetNextWindowPos(new Vector2(10, 330) * Scale, ImGuiCond.FirstUseEver);
         ImGui.SetNextWindowSize(new Vector2(520, 420) * Scale, ImGuiCond.FirstUseEver);
-        ImGui.SetNextWindowCollapsed(Touch, ImGuiCond.FirstUseEver);
+        if (game.Online is not null)
+        {
+            var viewport = ImGui.GetMainViewport();
+            ImGui.SetNextWindowPos(viewport.WorkPos + new Vector2(viewport.WorkSize.X - 10, 150 * Scale), ImGuiCond.Once, new Vector2(1, 0));
+            ImGui.SetNextWindowCollapsed(true, ImGuiCond.Once);
+        }
+        else
+        {
+            ImGui.SetNextWindowPos(new Vector2(10, 330) * Scale, ImGuiCond.FirstUseEver);
+            ImGui.SetNextWindowCollapsed(Touch, ImGuiCond.FirstUseEver);
+        }
         if (!ImGui.Begin("MPQ 文件"))
         {
             ImGui.End();

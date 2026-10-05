@@ -47,6 +47,8 @@ public sealed partial class GlueApi
     public Action<string>? SoundRequested { get; set; }
     public Action<string?>? MusicRequested { get; set; }
     public Action<string, string>? CVarChanged { get; set; }
+    /// <summary>Runs after the built-in functions are registered and before GlueXML loads, so the host can replace them.</summary>
+    public Action<UiScreen>? Registered { get; set; }
 
     public string? GetCVar(string name) => _cvars.GetValueOrDefault(name);
 
@@ -175,6 +177,7 @@ public sealed partial class GlueApi
         foreach (var name in NoOps)
             if (g.Get(name).IsNil())
                 Fn(name, _ => DynValue.Nil);
+        Registered?.Invoke(ui);
     }
 
     private void Agreement(string name, string cvar)

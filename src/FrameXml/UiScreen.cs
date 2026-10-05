@@ -33,8 +33,12 @@ public sealed class UiScreen
     private readonly Dictionary<string, List<Frame>> _events = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string?> _textures = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _pressedButtons = [];
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
     private int _serial;
     private Frame? _pressed;
+    private Vector2 _pressedAt;
+    private bool _dragging;
+    private const float DragDistance = 4f;
 
     public UiScreen(IUiFileSource files, UiLog? log = null)
     {
@@ -65,6 +69,10 @@ public sealed class UiScreen
     public Vector2 MousePosition { get; private set; }
     public Frame? MouseFocus { get; private set; }
     public EditBox? KeyboardFocus { get; private set; }
+    /// <summary>Seconds since the UI started; GetTime() and cooldown start times use this clock.</summary>
+    public double Time => _clock.Elapsed.TotalSeconds;
+    /// <summary>Key bindings from Bindings.xml (in-game UI only).</summary>
+    public KeyBindings Keys { get; } = new();
 
     /// <summary>Text width for layout; the renderer replaces the estimate with real font metrics.</summary>
     public Func<FontInfo, string, float> TextMeasurer { get; set; } = EstimateTextWidth;
@@ -113,6 +121,8 @@ public sealed class UiScreen
         Factories["TaxiRouteFrame"] = ui => new TaxiRouteFrame(ui);
         if (!Loader.LoadToc(FrameXmlToc))
             return false;
+        if (Files.Read(@"Interface\FrameXML\Bindings.xml") is { } bindings)
+            Keys.Load(this, System.Text.Encoding.UTF8.GetString(bindings));
         if (loadAddOns)
             foreach (var addOn in AddOns.Discover(Files).Where(a => a.Enabled && !a.LoadOnDemand))
                 AddOns.Load(this, addOn);
@@ -167,7 +177,12 @@ public sealed class UiScreen
         if (string.IsNullOrEmpty(name))
             return name;
         var index = name.IndexOf("$parent", StringComparison.OrdinalIgnoreCase);
-        return index < 0 ? name : name[..index] + (parent?.Name ?? "") + name[(index + 7)..];
+        if (index < 0)
+            return name;
+        // Unnamed frames are skipped: $parent is the nearest named ancestor.
+        while (parent is { Name: null, Parent: { } above })
+            parent = above;
+        return name[..index] + (parent?.Name ?? "") + name[(index + 7)..];
     }
 
     internal void InitFrame(Frame frame, string? name, Frame? parent)
@@ -284,13 +299,26 @@ public sealed class UiScreen
         Lua.Globals.Set("this", previous);
     }
 
-    /// <summary>Runs OnUpdate of every visible frame; arg1 is the elapsed time in seconds.</summary>
+    /// <summary>
+    /// Runs OnUpdate of every visible frame (arg1 is the elapsed time in seconds), then advances models: OnUpdateModel
+    /// each frame, and OnAnimFinished once a script has switched a model to its closing sequence (cooldown sweeps).
+    /// </summary>
     public void Update(float elapsed)
     {
         var argument = DynValue.NewNumber(elapsed);
         foreach (var frame in Frames.ToList())
-            if (frame.HasHandler("OnUpdate") && frame.IsVisible)
+        {
+            if (!frame.IsVisible)
+                continue;
+            if (frame.HasHandler("OnUpdate"))
                 frame.RunScript("OnUpdate", argument);
+            if (frame is Model model && model.HasHandler("OnUpdateModel"))
+            {
+                model.RunScript("OnUpdateModel");
+                if (model.Sequence != 0 && model.IsVisible)
+                    model.RunScript("OnAnimFinished");
+            }
+        }
     }
 
     /// <summary>Visible frames back to front: strata, then level, then creation order.</summary>
@@ -346,9 +374,20 @@ public sealed class UiScreen
         return null;
     }
 
+    /// <summary>A drag from a frame with OnDragStart is in progress; the release goes to OnReceiveDrag instead of a click.</summary>
+    public bool Dragging => _dragging;
+
     public void MouseMove(Vector2 point)
     {
         MousePosition = point;
+        if (_pressed is { } source && !_dragging && Vector2.Distance(point, _pressedAt) > DragDistance && source.HasHandler("OnDragStart") &&
+            source.DragButtons.Overlaps(_pressedButtons))
+        {
+            _dragging = true;
+            if (source is Button button)
+                button.Pushed = false;
+            source.RunScript("OnDragStart", DynValue.NewString(_pressedButtons.First()));
+        }
         var focus = HitTest(point);
         if (focus == MouseFocus)
             return;
@@ -364,6 +403,7 @@ public sealed class UiScreen
         if (MouseFocus is not { } frame)
             return;
         _pressed = frame;
+        _pressedAt = MousePosition;
         if (frame is Button { Enabled: true } pressedButton)
             pressedButton.Pushed = true;
         if (frame is EditBox box)
@@ -376,10 +416,17 @@ public sealed class UiScreen
         _pressedButtons.Remove(button);
         var pressed = _pressed;
         _pressed = null;
+        if (_dragging)
+        {
+            _dragging = false;
+            HitTest(MousePosition)?.RunScript("OnReceiveDrag");
+            pressed?.RunScript("OnDragStop");
+            return;
+        }
         if (pressed is Button clicked)
         {
             clicked.Pushed = false;
-            if (MouseFocus == clicked)
+            if (MouseFocus == clicked && clicked.ClickButtons.Contains(button))
                 clicked.Click(button);
         }
         pressed?.RunScript("OnMouseUp", DynValue.NewString(button));

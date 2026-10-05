@@ -27,6 +27,14 @@ public abstract class Game : IDisposable
     private IView? _view;
     private IInputContext? _inputContext;
     private int _frames;
+    private Host? _host;
+    private Game? _next;
+
+    /// <summary>The game currently driving the view; changes when one game hands over to another.</summary>
+    private sealed class Host
+    {
+        public required Game Current;
+    }
 
     static Game()
     {
@@ -38,7 +46,22 @@ public abstract class Game : IDisposable
     protected InputState Input { get; private set; } = null!;
     protected IView Window => _view!;
     protected IInputContext InputContext => _inputContext!;
-    protected Vector2D<int> FramebufferSize => _view!.FramebufferSize;
+    protected Vector2D<int> FramebufferSize
+    {
+        get
+        {
+            try
+            {
+                return _view!.FramebufferSize;
+            }
+            catch (Silk.NET.SDL.SdlException)
+            {
+                // Silk reports any error SDL left pending from an earlier, unrelated call (e.g. touch reset).
+                Silk.NET.SDL.Sdl.GetApi().ClearError();
+                return _view!.FramebufferSize;
+            }
+        }
+    }
     public GameOptions Options { get; private set; } = new("Game");
 
     /// <summary>Opens a desktop window and runs until it is closed.</summary>
@@ -59,15 +82,35 @@ public abstract class Game : IDisposable
     {
         Options = options;
         _view = view;
+        var host = _host = new Host { Current = this };
         view.Load += HandleLoad;
-        view.Update += dt => OnUpdate((float)dt);
-        view.Render += HandleRender;
-        view.FramebufferResize += size => Gl.Viewport(size);
-        view.Closing += OnUnload;
+        view.Update += dt => host.Current.OnUpdate((float)dt);
+        view.Render += dt => host.Current.HandleRender(dt);
+        view.FramebufferResize += size => host.Current.Gl.Viewport(size);
+        view.Closing += () => host.Current.OnUnload();
         view.Run();
     }
 
     protected void Exit() => _view?.Close();
+
+    /// <summary>
+    /// Hands the window, GL context and input to <paramref name="next"/> after the current frame: this game is
+    /// unloaded and <paramref name="next"/> is loaded in its place (glue screens to world and back).
+    /// </summary>
+    protected void SwitchTo(Game next) => _next = next;
+
+    private void Adopt(Game previous)
+    {
+        _view = previous._view;
+        _inputContext = previous._inputContext;
+        _host = previous._host;
+        _frames = previous._frames;
+        Gl = previous.Gl;
+        Input = previous.Input;
+        Options = previous.Options;
+        _host!.Current = this;
+        OnLoad();
+    }
 
     private void HandleLoad()
     {
@@ -84,6 +127,15 @@ public abstract class Game : IDisposable
     {
         OnRender((float)dt);
         Input.EndFrame();
+
+        if (_next is { } next)
+        {
+            _next = null;
+            OnUnload();
+            next.Adopt(this);
+            next._frames++;
+            return;
+        }
 
         _frames++;
         if (Options.ExitAfterFrames is { } limit && _frames >= limit)

@@ -30,6 +30,7 @@ public sealed class AssetCache : IDisposable
     private readonly ConcurrentDictionary<string, Task<ModelData?>> _modelTasks = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, Texture?> _textures = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, GpuModel?> _models = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Task<M2Skeleton?>> _skeletons = new(StringComparer.OrdinalIgnoreCase);
     private int _uploadBudget;
 
     public Texture Fallback { get; }
@@ -47,12 +48,15 @@ public sealed class AssetCache : IDisposable
 
     public void BeginFrame() => _uploadBudget = UploadsPerFrame;
 
-    public Texture? Texture(string name)
+    public Texture? Texture(string name) => Texture(name, () => Image(name));
+
+    /// <summary>A texture built by <paramref name="build"/> on the thread pool (e.g. a composited character skin), cached by key.</summary>
+    public Texture? Texture(string key, Func<RgbaImage?> build)
     {
-        if (_textures.TryGetValue(name, out var texture))
+        if (_textures.TryGetValue(key, out var texture))
             return texture;
 
-        var task = _imageTasks.GetOrAdd(name, n => Task.Run(() => Load(n, data => BlpImage.Decode(data))));
+        var task = _imageTasks.GetOrAdd(key, _ => Task.Run(build));
         if (!task.IsCompleted || _uploadBudget <= 0)
             return null;
 
@@ -60,10 +64,15 @@ public sealed class AssetCache : IDisposable
         var image = task.Result;
         texture = image is null ? null : new Texture(_gl, image.Width, image.Height, image.Pixels);
         Bytes += texture?.Bytes ?? 0;
-        _textures[name] = texture;
-        _imageTasks.TryRemove(name, out _);
+        _textures[key] = texture;
+        _imageTasks.TryRemove(key, out _);
         return texture;
     }
+
+    public bool Exists(string name) => _files.Exists(name);
+
+    /// <summary>Decodes a BLP synchronously (any thread); null when missing or unreadable.</summary>
+    public RgbaImage? Image(string name) => Load(name, data => BlpImage.Decode(data));
 
     public GpuModel? Model(string name)
     {
@@ -81,6 +90,13 @@ public sealed class AssetCache : IDisposable
         _models[name] = model;
         _modelTasks.TryRemove(name, out _);
         return model;
+    }
+
+    /// <summary>Bones and animations of an M2, or null while loading or when it has none.</summary>
+    public M2Skeleton? Skeleton(string name)
+    {
+        var task = _skeletons.GetOrAdd(name, n => Task.Run(() => Load<M2Skeleton>(n, data => M2Skeleton.Read(data)!)));
+        return task.IsCompleted ? task.Result : null;
     }
 
     /// <summary>CPU-side model data without requiring a GPU upload; starts loading if needed.</summary>

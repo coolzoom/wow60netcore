@@ -47,6 +47,8 @@ public class Frame(UiScreen ui) : Region(ui)
     public Backdrop? Backdrop { get; set; }
     /// <summary>Left, right, top, bottom; positive values shrink the clickable area.</summary>
     public Vector4 HitRectInsets { get; set; }
+    /// <summary>Mouse buttons that start OnDragStart (RegisterForDrag), e.g. "LeftButton".</summary>
+    public HashSet<string> DragButtons { get; } = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Creation order, used to break ties between frames of the same strata and level.</summary>
     public int Serial { get; internal set; }
 

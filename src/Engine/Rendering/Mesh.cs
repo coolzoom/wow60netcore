@@ -19,7 +19,8 @@ public sealed class Mesh : IDisposable
     {
     }
 
-    public unsafe Mesh(GL gl, ReadOnlySpan<float> vertices, ReadOnlySpan<uint> indices)
+    /// <param name="dynamic">The vertices will be replaced often (<see cref="UpdateVertices"/>), e.g. skinned models.</param>
+    public unsafe Mesh(GL gl, ReadOnlySpan<float> vertices, ReadOnlySpan<uint> indices, bool dynamic = false)
     {
         _gl = gl;
         IndexCount = indices.Length;
@@ -30,7 +31,7 @@ public sealed class Mesh : IDisposable
 
         _vbo = gl.GenBuffer();
         gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
-        gl.BufferData(BufferTargetARB.ArrayBuffer, vertices, BufferUsageARB.StaticDraw);
+        gl.BufferData(BufferTargetARB.ArrayBuffer, vertices, dynamic ? BufferUsageARB.DynamicDraw : BufferUsageARB.StaticDraw);
 
         _ebo = gl.GenBuffer();
         gl.BindBuffer(BufferTargetARB.ElementArrayBuffer, _ebo);
@@ -48,6 +49,13 @@ public sealed class Mesh : IDisposable
     }
 
     public void Draw() => DrawRange(0, IndexCount);
+
+    /// <summary>Overwrites the start of the vertex buffer (same layout and at most the original size).</summary>
+    public void UpdateVertices(ReadOnlySpan<float> vertices)
+    {
+        _gl.BindBuffer(BufferTargetARB.ArrayBuffer, _vbo);
+        _gl.BufferSubData(BufferTargetARB.ArrayBuffer, 0, vertices);
+    }
 
     public unsafe void DrawRange(int start, int count)
     {

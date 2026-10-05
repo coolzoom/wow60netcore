@@ -4,6 +4,7 @@
     <ProjectReference Include="..\Engine\Engine.csproj" />
     <ProjectReference Include="..\Formats\Formats.csproj" />
     <ProjectReference Include="..\FrameXml\FrameXml.csproj" />
+    <ProjectReference Include="..\Net\Net.csproj" />
   </ItemGroup>
 
   <ItemGroup>

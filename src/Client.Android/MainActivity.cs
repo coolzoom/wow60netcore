@@ -10,7 +10,8 @@ namespace Client;
 /// <summary>
 /// Android entry point: SDL hosts an OpenGL ES 3.0 surface and runs the same games as the desktop client.
 /// Game data goes in the app's external files directory: /sdcard/Android/data/org.netcoreclient.wow/files/Data/*.MPQ
-/// (android.sh 4 pushes it). Intent extras: mode = world | glue | procedural, map = map directory.
+/// (android.sh 4 pushes it). Intent extras: mode = world | glue | procedural, map = map directory,
+/// realmlist = logon server host[:port] for glue mode (otherwise realmlist.wtf).
 /// </summary>
 [Activity(Name = "org.netcoreclient.wow.MainActivity", Label = "WoW NetCore", MainLauncher = true, Exported = true,
     Theme = "@android:style/Theme.NoTitleBar.Fullscreen",
@@ -44,8 +45,11 @@ public sealed class MainActivity : SilkActivity
 
         var options = new GameOptions("WoW NetCore", UiScale: Resources?.DisplayMetrics?.Density ?? 1f, TouchControls: true);
         var view = Silk.NET.Windowing.Window.GetView(ViewOptions.Default with { API = Game.MobileApi, VSync = true });
+        using var online = data is not null && mode == "glue"
+            ? new Online.OnlineClient(data, looseFiles: false, acceptAgreements: true, Intent?.GetStringExtra("realmlist"))
+            : null;
         using Game game = data is null || mode == "procedural" ? new ClientGame(1121)
-            : mode == "glue" ? new GlueGame(data, looseFiles: false, acceptAgreements: true)
+            : online is not null ? online.Glue()
             : new WorldGame(data, map, map.Equals("Azeroth", StringComparison.OrdinalIgnoreCase) ? Goldshire : null);
         game.Run(view, options);
     }
