@@ -480,7 +480,8 @@ public sealed class LuaBindings
         Def<Button>("GetHighlightTexture", (b, _) => O(b.HighlightTexture));
         Def<Button>("SetPushedTextOffset", (b, a) => b.PushedTextOffset = new Vector2(a.F(0), a.F(1)));
 
-        Def<CheckButton>("SetChecked", (c, a) => c.Checked = a.Bool(0));
+        // The client reads the argument as a number when it is one: SetChecked(0) unchecks.
+        Def<CheckButton>("SetChecked", (c, a) => c.Checked = a[0].Type == DataType.Number ? a[0].Number != 0 : a.Bool(0));
         Def<CheckButton>("GetChecked", (c, _) => B(c.Checked));
         Def<CheckButton>("SetCheckedTexture", (c, a) => c.CheckedTexture = TextureArg(c, a, c.CheckedTexture, DrawLayer.Overlay));
         Def<CheckButton>("SetDisabledCheckedTexture", (c, a) => c.DisabledCheckedTexture = TextureArg(c, a, c.DisabledCheckedTexture, DrawLayer.Overlay));

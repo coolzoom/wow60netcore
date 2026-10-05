@@ -85,8 +85,7 @@ public sealed class GlueGame(string dataDirectory, bool looseFiles, bool acceptA
         switch (StartScreen)
         {
             case "charselect" or "charcreate":
-                _ui.SetGlueScreen(StartScreen);
-                break;
+                _ui.SetGlueScreen(StartScreen);                break;
             case "disconnected":
                 _ui.FireEvent("DISCONNECTED_FROM_SERVER");
                 break;

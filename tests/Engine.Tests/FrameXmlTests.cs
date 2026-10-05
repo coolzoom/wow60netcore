@@ -125,6 +125,20 @@ public class UiLoaderTests
     }
 
     [Fact]
+    public void CheckButton_SetCheckedZeroUnchecks()
+    {
+        var ui = Load(
+            (@"Interface\Test\Test.toc", "Main.xml"),
+            (@"Interface\Test\Main.xml", Header + "<CheckButton name=\"Box\" checked=\"true\"/></Ui>"));
+        ui.Lua.Execute("Box:SetChecked(0)", "test");
+        Assert.Equal("nil", Lua(ui, "Box:GetChecked()"));
+        ui.Lua.Execute("Box:SetChecked(1)", "test");
+        Assert.Equal("1", Lua(ui, "Box:GetChecked()"));
+        ui.Lua.Execute("Box:SetChecked(nil)", "test");
+        Assert.Equal("nil", Lua(ui, "Box:GetChecked()"));
+    }
+
+    [Fact]
     public void Toc_LoadsFilesRelativeToTocAndIncludesRelativeToFile()
     {
         var ui = Load(
