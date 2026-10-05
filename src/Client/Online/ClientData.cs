@@ -5,7 +5,7 @@ using Formats.Mpq;
 namespace Client.Online;
 
 public sealed record RaceInfo(int Id, string Name, string FileString, string Faction, string Hair, string MaleFacialHair,
-    string FemaleFacialHair);
+    string FemaleFacialHair, int MaleDisplay = 0, int FemaleDisplay = 0);
 
 public sealed record ClassInfo(int Id, string Name, string FileString);
 
@@ -41,6 +41,7 @@ public sealed class ClientData
     private readonly Dictionary<int, ItemDisplay> _itemDisplays = [];
     private readonly Dictionary<int, int[]> _helmetVis = [];
     private readonly Dictionary<int, string> _racePrefixes = [];
+    private readonly Dictionary<(int Race, int Class, int Sex), int[]> _startOutfits = [];
 
     /// <summary>Inventory slots of CreatureDisplayInfoExtra's NPCItemDisplay columns (head ... tabard).</summary>
     private static readonly int[] NpcItemSlots = [0, 2, 3, 4, 5, 6, 7, 8, 9, 18];
@@ -58,8 +59,8 @@ public sealed class ClientData
 
         var races = Dbc("ChrRaces");
         Races = Rows(races).Select(r => new RaceInfo(races.GetInt(r, 0), races.GetLocalizedString(r, 17), races.GetString(r, 15),
-                races.GetInt(r, 2) is 1 or 3 or 4 or 115 ? "Alliance" : "Horde", races.GetString(r, 28), races.GetString(r, 26),
-                races.GetString(r, 27)))
+            races.GetInt(r, 2) is 1 or 3 or 4 or 115 ? "Alliance" : "Horde", races.GetString(r, 28), races.GetString(r, 26),
+            races.GetString(r, 27), races.GetInt(r, 4), races.GetInt(r, 5)))
             .ToList();
 
         var classes = Dbc("ChrClasses");
@@ -136,7 +137,36 @@ public sealed class ClientData
                 _gameObjectModels[objects.GetInt(r, 0)] = M2Model.NormalizePath(path);
 
         Maps = MapDbc.Read(files.Read("DBFilesClient\\Map.dbc")).ToList();
+
+        // CharStartOutfit: id, race | class << 8 | sex << 16, then 12 item ids, 12 display ids, 12 inventory types.
+        var outfits = Dbc("CharStartOutfit");
+        foreach (var r in Rows(outfits))
+        {
+            var key = outfits.GetInt(r, 1);
+            var items = new int[19];
+            for (var k = 0; k < 12; k++)
+                if (outfits.GetInt(r, 14 + k) is > 0 and var display && SlotOf(outfits.GetInt(r, 26 + k)) is { } slot && items[slot] == 0)
+                    items[slot] = display;
+            _startOutfits.TryAdd((key & 0xFF, key >> 8 & 0xFF, key >> 16 & 0xFF), items);
+        }
     }
+
+    /// <summary>The equipment slot an inventory type is worn in (null for bags, rings, ammo and so on).</summary>
+    private static int? SlotOf(int inventoryType) => inventoryType switch
+    {
+        1 => CharacterModels.Head, 3 => CharacterModels.Shoulder, 4 => CharacterModels.Shirt, 5 or 20 => CharacterModels.Chest,
+        6 => CharacterModels.Waist, 7 => CharacterModels.Legs, 8 => CharacterModels.Feet, 9 => CharacterModels.Wrist,
+        10 => CharacterModels.Hands, 16 => CharacterModels.Back, 13 or 17 or 21 => CharacterModels.MainHand,
+        14 or 22 or 23 => CharacterModels.OffHand, 15 or 25 or 26 => CharacterModels.Ranged, 19 => CharacterModels.Tabard,
+        _ => null,
+    };
+
+    /// <summary>The model of a playable race and sex (0 male, 1 female), from ChrRaces' display ids.</summary>
+    public string? CharacterModel(int race, int sex) =>
+        Race(race) is { } info && CreatureDisplay(sex == 0 ? info.MaleDisplay : info.FemaleDisplay) is { } display ? display.Model : null;
+
+    /// <summary>Item display ids by equipment slot that a new character of this race, class and sex starts wearing.</summary>
+    public int[]? StartOutfit(int race, int classId, int sex) => _startOutfits.GetValueOrDefault((race, classId, sex));
 
     private static IEnumerable<int> Rows(DbcFile dbc) => Enumerable.Range(0, dbc.RecordCount);
 

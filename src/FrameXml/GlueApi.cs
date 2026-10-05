@@ -17,8 +17,7 @@ public sealed partial class GlueApi
         "AcceptContest", "CancelRealmListQuery", "ChangeRealm", "CloseMenus", "CreateCharacter", "CycleCharCustomization",
         "DeleteCharacter", "EnterWorld", "GetCharacterListUpdate", "HideCursor", "PatchDownloadApply", "PatchDownloadCancel",
         "PINEntered", "RandomizeCharCustomization", "RealmListDialogCancelled", "RenameCharacter", "RequestRealmList",
-        "ResetCharCustomize", "ResetRaceSelect", "SelectCharacter", "SetCharCustomizeBackground", "SetCharCustomizeFrame",
-        "SetCharSelectBackground", "SetCharSelectModelFrame", "SetCharacterCreateFacing", "SetCharacterSelectFacing",
+        "ResetCharCustomize", "ResetRaceSelect", "SelectCharacter",
         "SetPreferredInfo", "SetRaceSelectFrame", "SetScriptMemory", "SetSelectedClass", "SetSelectedRace", "SetSelectedSex",
         "ShowCursor", "SortRealms", "SurveyNotificationDone", "UpdateCustomizationScene", "UpdateRaceHighlight",
         "UpdateSelectionCustomizationScene", "SetAddonVersionCheck",
@@ -40,6 +39,14 @@ public sealed partial class GlueApi
     private List<AddOnInfo> _addOns = [];
 
     public IReadOnlyDictionary<string, string> CVars => _cvars;
+
+    /// <summary>The model frame showing the character select scene (SetCharSelectModelFrame).</summary>
+    public Objects.Model? CharSelectFrame { get; private set; }
+    /// <summary>The model frame showing the character create scene (SetCharCustomizeFrame).</summary>
+    public Objects.Model? CharCustomizeFrame { get; private set; }
+    /// <summary>Character facing in degrees on the select and create screens.</summary>
+    public float CharacterSelectFacing { get; set; }
+    public float CharacterCreateFacing { get; set; }
 
     public Action<string, string>? LoginRequested { get; set; }
     public Action? QuitRequested { get; set; }
@@ -158,12 +165,17 @@ public sealed partial class GlueApi
         Fn("GetMovieResolution", _ => N(800));
         Fn("GetMovieSubtitles", _ => DynValue.Nil);
         Fn("PatchDownloadProgress", _ => Tuple(N(0), N(0)));
-        Fn("GetCharacterSelectFacing", _ => N(0));
-        Fn("GetCharacterCreateFacing", _ => N(0));
+        Fn("SetCharSelectModelFrame", a => { CharSelectFrame = ui.FindFrame(a.Str(0) ?? "") as Objects.Model; return DynValue.Nil; });
+        Fn("SetCharCustomizeFrame", a => { CharCustomizeFrame = ui.FindFrame(a.Str(0) ?? "") as Objects.Model; return DynValue.Nil; });
+        Fn("SetCharSelectBackground", a => { if (CharSelectFrame is { } frame) frame.ModelFile = a.Str(0); return DynValue.Nil; });
+        Fn("SetCharCustomizeBackground", a => { if (CharCustomizeFrame is { } frame) frame.ModelFile = a.Str(0); return DynValue.Nil; });
+        Fn("GetCharacterSelectFacing", _ => N(CharacterSelectFacing));
+        Fn("SetCharacterSelectFacing", a => { CharacterSelectFacing = Facing(a.F(0)); return DynValue.Nil; });
+        Fn("GetCharacterCreateFacing", _ => N(CharacterCreateFacing));
+        Fn("SetCharacterCreateFacing", a => { CharacterCreateFacing = Facing(a.F(0)); return DynValue.Nil; });
         Fn("GetRandomName", _ => S(""));
-        Fn("GetAvailableRaces", _ => Tuple(S("Human"), S("HUMAN"), B(true), S("Dwarf"), S("DWARF"), B(true),
-            S("Night Elf"), S("NIGHTELF"), B(true), S("Gnome"), S("GNOME"), B(true), S("Orc"), S("ORC"), B(true),
-            S("Undead"), S("SCOURGE"), B(true), S("Tauren"), S("TAUREN"), B(true), S("Troll"), S("TROLL"), B(true)));
+        Fn("GetAvailableRaces", _ => Tuple(S("Human"), S("HUMAN"), S("Dwarf"), S("DWARF"), S("Night Elf"), S("NIGHTELF"),
+            S("Gnome"), S("GNOME"), S("Orc"), S("ORC"), S("Undead"), S("SCOURGE"), S("Tauren"), S("TAUREN"), S("Troll"), S("TROLL")));
         Fn("GetClassesForRace", _ => Tuple(S("Warrior"), S("WARRIOR")));
         Fn("GetSelectedRace", _ => N(1));
         Fn("GetSelectedSex", _ => N(2));
@@ -179,6 +191,9 @@ public sealed partial class GlueApi
                 Fn(name, _ => DynValue.Nil);
         Registered?.Invoke(ui);
     }
+
+    /// <summary>Degrees wrapped to [0, 360), as the client keeps them.</summary>
+    private static float Facing(float degrees) => (degrees % 360 + 360) % 360;
 
     private void Agreement(string name, string cvar)
     {

@@ -52,9 +52,10 @@ public sealed class SkinnedActor : IDisposable
     public uint Length(int sequence) => _skeleton.Sequences[sequence].Length;
 
     /// <summary>Poses the skeleton and re-skins the vertices into the actor's buffer.</summary>
-    public void Update(int sequence, uint elapsed, uint globalTime)
+    /// <param name="billboard">Model-space camera-facing rotation for billboarded bones (see <see cref="M2Skeleton.Pose"/>).</param>
+    public void Update(int sequence, uint elapsed, uint globalTime, Matrix4x4? billboard = null)
     {
-        _skeleton.Pose(sequence, elapsed, globalTime, _bones);
+        _skeleton.Pose(sequence, elapsed, globalTime, _bones, billboard);
         for (var i = 0; i < _bones.Length; i++)
             _bones[i] = FromRender * _bones[i] * ToRender;
 

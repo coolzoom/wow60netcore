@@ -140,7 +140,7 @@ public sealed class M2Skeleton
         return new M2Skeleton(sequences, bones, globals, indices, weights);
     }
 
-    private static M2Track<T> ReadTrack<T>(byte[] data, int o, int valueSize, Func<byte[], int, T> read) where T : struct
+    internal static M2Track<T> ReadTrack<T>(byte[] data, int o, int valueSize, Func<byte[], int, T> read) where T : struct
     {
         var interpolation = data.U16(o);
         var global = (short)data.U16(o + 2);
@@ -172,11 +172,21 @@ public sealed class M2Skeleton
         return index;
     }
 
-    /// <summary>Model-space bone matrices for sequence <paramref name="sequence"/> at <paramref name="elapsed"/> ms into it.</summary>
-    public void Pose(int sequence, uint elapsed, uint globalTime, Matrix4x4[] matrices)
+    /// <summary>Time on the shared timeline <paramref name="elapsed"/> ms into sequence <paramref name="sequence"/> (looping).</summary>
+    public uint SequenceTime(int sequence, uint elapsed)
     {
         var seq = Sequences[Math.Clamp(sequence, 0, Sequences.Count - 1)];
-        var time = seq.Start + elapsed % seq.Length;
+        return seq.Start + elapsed % seq.Length;
+    }
+
+    /// <summary>Model-space bone matrices for sequence <paramref name="sequence"/> at <paramref name="elapsed"/> ms into it.</summary>
+    /// <param name="billboard">
+    /// Model-space rotation turning +X toward the camera (with +Y to its right and +Z up); billboarded bones use it
+    /// in place of their own rotation. Without it they keep their animated rotation.
+    /// </param>
+    public void Pose(int sequence, uint elapsed, uint globalTime, Matrix4x4[] matrices, Matrix4x4? billboard = null)
+    {
+        var time = SequenceTime(sequence, elapsed);
         for (var i = 0; i < Bones.Count; i++)
         {
             var bone = Bones[i];
@@ -184,9 +194,18 @@ public sealed class M2Skeleton
             var rotation = bone.Rotation.Sample(sequence, time, globalTime, GlobalSequences, Quaternion.Identity,
                 (a, b, t) => Quaternion.Normalize(Quaternion.Slerp(a, b, t)));
             var scale = bone.Scale.Sample(sequence, time, globalTime, GlobalSequences, Vector3.One, Vector3.Lerp);
+            var hasParent = bone.Parent >= 0 && bone.Parent < i;
+            if (billboard is { } facing && (bone.Flags & M2Bone.Billboard) != 0)
+            {
+                var origin = bone.Pivot + translation;
+                if (hasParent)
+                    origin = Vector3.Transform(origin, matrices[bone.Parent]);
+                matrices[i] = Matrix4x4.CreateTranslation(-bone.Pivot) * Matrix4x4.CreateScale(scale) * facing * Matrix4x4.CreateTranslation(origin);
+                continue;
+            }
             var local = Matrix4x4.CreateTranslation(-bone.Pivot) * Matrix4x4.CreateScale(scale) *
                         Matrix4x4.CreateFromQuaternion(rotation) * Matrix4x4.CreateTranslation(bone.Pivot + translation);
-            matrices[i] = bone.Parent >= 0 && bone.Parent < i ? local * matrices[bone.Parent] : local;
+            matrices[i] = hasParent ? local * matrices[bone.Parent] : local;
         }
     }
 }

@@ -1,6 +1,7 @@
 using System.Numerics;
 using Client.Online;
 using Client.Ui;
+using Client.World;
 using Engine;
 using Formats.Mpq;
 using FrameXml;
@@ -11,8 +12,8 @@ using Silk.NET.OpenGL;
 namespace Client;
 
 /// <summary>
-/// The glue screens (login, realm list, character select) loaded from Interface\GlueXML the way WoW.exe does,
-/// rendered 2D. The 3D login scene behind them (ModelFFX) is not drawn.
+/// The glue screens (login, realm list, character select and create) loaded from Interface\GlueXML the way WoW.exe
+/// does: the 3D scene of the visible ModelFFX frame (with the character on select and create), then the 2D interface.
 /// </summary>
 public sealed class GlueGame(string dataDirectory, bool looseFiles, bool acceptAgreements) : Game
 {
@@ -28,6 +29,8 @@ public sealed class GlueGame(string dataDirectory, bool looseFiles, bool acceptA
     private GlueRenderer _renderer = null!;
     private UiScreen _ui = null!;
     private GlueNetwork? _network;
+    private AssetCache _assets = null!;
+    private GlueScene _scene = null!;
 
     public UiScreen Ui => _ui;
     /// <summary>Set to log in to a server; without it the screens run offline.</summary>
@@ -63,6 +66,8 @@ public sealed class GlueGame(string dataDirectory, bool looseFiles, bool acceptA
             };
 
         _renderer = new GlueRenderer(Gl, _ui, source);
+        _assets = new AssetCache(Gl, _files);
+        _scene = new GlueScene(Gl, _assets, _ui, api, _network, Online?.Data(_files));
         var started = DateTime.UtcNow;
         var loaded = _ui.LoadGlue(api);
         var log = Path.Combine(Path.GetTempPath(), "NetCoreClient-GlueXML.log");
@@ -180,6 +185,8 @@ public sealed class GlueGame(string dataDirectory, bool looseFiles, bool acceptA
     {
         Gl.ClearColor(0, 0, 0, 1);
         Gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        _assets.BeginFrame();
+        _scene.Render(new Vector2(Window.Size.X, Window.Size.Y), dt);
         _imgui.Update(dt);
         _renderer.Draw(new Vector2(Window.Size.X, Window.Size.Y), dt);
         _imgui.Render();
@@ -193,6 +200,8 @@ public sealed class GlueGame(string dataDirectory, bool looseFiles, bool acceptA
             network.EnteredWorld -= OnEnteredWorld;
             network.Dispose();
         }
+        _scene.Dispose();
+        _assets.Dispose();
         _renderer.Dispose();
         _imgui.Dispose();
         _files.Dispose();

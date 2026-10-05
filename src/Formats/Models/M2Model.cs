@@ -2,21 +2,41 @@ using System.Numerics;
 
 namespace Formats.Models;
 
+/// <summary>M2 material blending (M2Material.blendingMode); WMOs use the first three.</summary>
 public enum BlendMode
 {
     Opaque = 0,
     AlphaKey = 1,
     Alpha = 2,
+    /// <summary>src + dst, ignoring alpha.</summary>
     Additive = 3,
+    /// <summary>src * alpha + dst.</summary>
+    AdditiveAlpha = 4,
+    Modulate = 5,
+    Modulate2x = 6,
+}
+
+/// <summary>M2Material render flags.</summary>
+[Flags]
+public enum RenderFlags
+{
+    None = 0,
+    Unlit = 0x1,
+    Unfogged = 0x2,
+    TwoSided = 0x4,
+    NoDepthTest = 0x8,
+    NoDepthWrite = 0x10,
 }
 
 /// <summary>
 /// A draw range sharing one texture and blend state. Texture is null for runtime-replaceable skins, whose kind is
 /// <see cref="TextureType"/> (1 character skin, 2 cape, 6 hair, 11-13 creature skins). Geoset is the submesh id
-/// characters use to pick hair styles and equipment pieces (0 = always shown).
+/// characters use to pick hair styles and equipment pieces (0 = always shown). Color, Transparency and UvAnimation
+/// index the model's animated colors, texture weights and texture transforms (-1 = none).
 /// </summary>
 public sealed record ModelBatch(int IndexStart, int IndexCount, string? Texture, BlendMode Blend, bool TwoSided,
-    int TextureType = 0, int Geoset = 0);
+    int TextureType = 0, int Geoset = 0, int Color = -1, int Transparency = -1, int UvAnimation = -1,
+    RenderFlags Flags = RenderFlags.None, int PriorityPlane = 0);
 
 /// <summary>A point items attach to (1 right hand, 2 left hand, 0 shield, 5/6 shoulders, 11 helmet, 26-28 sheathed).</summary>
 public sealed record M2Attachment(int Id, int Bone, Vector3 Position);
@@ -91,6 +111,8 @@ public sealed class M2Model
         var (textureNames, textureTypes) = ReadTextures(data);
         var textureLookup = data.Structs<ushort>(data.I32(0x98), data.I32(0x94));
         var materials = data.Structs<uint>(data.I32(0x88), data.I32(0x84));
+        var weightLookup = data.Structs<short>(data.I32(0xA8), data.I32(0xA4));
+        var transformLookup = data.Structs<short>(data.I32(0xB0), data.I32(0xAC));
 
         var submeshOffset = data.I32(view + 28);
         var submeshCount = data.I32(view + 24);
@@ -101,22 +123,29 @@ public sealed class M2Model
         for (var b = 0; b < batchCount; b++)
         {
             var o = batchOffset + b * BatchStride;
+            var priorityPlane = (sbyte)data[o + 1];
             var submesh = data.U16(o + 4);
+            var color = (short)data.U16(o + 8);
             var material = data.U16(o + 10);
             var textureCombo = data.U16(o + 16);
+            var weightCombo = data.U16(o + 20);
+            var transformCombo = data.U16(o + 22);
             if (submesh >= submeshCount)
                 continue;
 
+            // The "level" field holds the high 16 bits of the index start for views with more than 65535 indices.
             var s = submeshOffset + submesh * SubmeshStride;
-            var indexStart = data.U16(s + 8);
+            var indexStart = data.U16(s + 8) + (data.U16(s + 2) << 16);
             var indexCount = data.U16(s + 10);
 
             var textureIndex = textureCombo < textureLookup.Length ? textureLookup[textureCombo] : -1;
             var texture = textureIndex >= 0 && textureIndex < textureNames.Length ? textureNames[textureIndex] : null;
             var textureType = textureIndex >= 0 && textureIndex < textureTypes.Length ? textureTypes[textureIndex] : 0;
-            var flags = material < materials.Length ? materials[material] & 0xFFFF : 0;
-            var blend = material < materials.Length ? (BlendMode)Math.Min(materials[material] >> 16, 3) : BlendMode.Opaque;
-            batches.Add(new ModelBatch(indexStart, indexCount, texture, blend, TwoSided: (flags & 0x4) != 0, textureType, data.U16(s)));
+            var flags = material < materials.Length ? (RenderFlags)(materials[material] & 0x1F) : RenderFlags.None;
+            var blend = material < materials.Length ? (BlendMode)Math.Min(materials[material] >> 16, 6) : BlendMode.Opaque;
+            batches.Add(new ModelBatch(indexStart, indexCount, texture, blend, TwoSided: flags.HasFlag(RenderFlags.TwoSided), textureType,
+                data.U16(s), color, weightCombo < weightLookup.Length ? weightLookup[weightCombo] : -1,
+                transformCombo < transformLookup.Length ? transformLookup[transformCombo] : -1, flags, priorityPlane));
         }
         Batches = batches;
     }

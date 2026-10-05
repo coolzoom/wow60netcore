@@ -47,10 +47,9 @@ public sealed class LuaBindings
 
     private static readonly string[] ModelNoOps =
     [
-        "ClearModel", "SetSequence", "SetSequenceTime", "SetCamera", "SetPosition", "SetLight", "SetFogNear", "SetFogFar",
-        "ClearFog", "ReplaceIconTexture", "AdvanceTime", "SetUnit", "RefreshUnit", "SetRotation", "SetCreature",
-        "Dress", "Undress", "TryOn", "InitializeTabardColors", "Save", "CycleVariation", "AddCharacterLight",
-        "AddLight", "AddPetLight", "ResetLights", "SetModelScale", "SetFacing",
+        "SetSequenceTime", "SetPosition", "SetLight", "ReplaceIconTexture", "AdvanceTime", "SetUnit", "RefreshUnit",
+        "SetRotation", "SetCreature", "Dress", "Undress", "TryOn", "InitializeTabardColors", "Save", "CycleVariation",
+        "AddCharacterLight", "AddLight", "AddPetLight", "ResetLights",
     ];
 
     public LuaBindings(UiScreen ui)
@@ -594,6 +593,13 @@ public sealed class LuaBindings
         foreach (var name in ModelNoOps)
             Def<Model>(name, (_, _) => { });
         Def<Model>("SetSequence", (m, a) => m.Sequence = a.Int(0));
+        Def<Model>("SetCamera", (m, a) => m.Camera = a.Int(0));
+        Def<Model>("SetFogNear", (m, a) => m.FogNear = a.F(0));
+        Def<Model>("SetFogFar", (m, a) => m.FogFar = a.F(0, 1));
+        Def<Model>("ClearFog", (m, _) => m.FogColor = null);
+        Def<Model>("SetFacing", (m, a) => m.Facing = a.F(0));
+        Def<Model>("SetModelScale", (m, a) => m.ModelScale = a.F(0, 1));
+        Def<Model>("ClearModel", (m, _) => m.ModelFile = null);
 
         Def<MessageFrame>("AddMessage", (m, a) => m.AddMessage(a.Str(0) ?? "", new Color4(a.F(1, 1), a.F(2, 1), a.F(3, 1))));
         Def<MessageFrame>("Clear", (m, _) => { m.Messages.Clear(); m.ScrollOffset = 0; });

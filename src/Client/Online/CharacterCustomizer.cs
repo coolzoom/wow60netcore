@@ -88,6 +88,10 @@ public sealed class CharacterCustomizer
         Normalize();
     }
 
+    /// <summary>How the character being created looks, in its class's starting outfit.</summary>
+    public Appearance Look => new(Race.Id, Sex, Skin, Face, HairStyle, HairColor, FacialHair, null,
+        _data.StartOutfit(Race.Id, Class.Id, Sex));
+
     public CharacterCreateInfo Build(string name) => new(name, (byte)Race.Id, (byte)Class.Id, (byte)Sex, (byte)Skin, (byte)Face,
         (byte)HairStyle, (byte)HairColor, (byte)FacialHair);
 

@@ -31,6 +31,7 @@ public sealed class AssetCache : IDisposable
     private readonly Dictionary<string, Texture?> _textures = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, GpuModel?> _models = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, Task<M2Skeleton?>> _skeletons = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Task<M2Effects?>> _effects = new(StringComparer.OrdinalIgnoreCase);
     private int _uploadBudget;
 
     public Texture Fallback { get; }
@@ -96,6 +97,20 @@ public sealed class AssetCache : IDisposable
     public M2Skeleton? Skeleton(string name)
     {
         var task = _skeletons.GetOrAdd(name, n => Task.Run(() => Load<M2Skeleton>(n, data => M2Skeleton.Read(data)!)));
+        return task.IsCompleted ? task.Result : null;
+    }
+
+    /// <summary>Like <see cref="Skeleton"/>, but tells "still loading" (false) apart from "has no skeleton" (true, null).</summary>
+    public bool TryGetSkeleton(string name, out M2Skeleton? skeleton)
+    {
+        skeleton = Skeleton(name);
+        return _skeletons.TryGetValue(name, out var task) && task.IsCompleted;
+    }
+
+    /// <summary>Colors, UV animations, cameras, lights and particles of an M2, or null while loading or when unreadable.</summary>
+    public M2Effects? Effects(string name)
+    {
+        var task = _effects.GetOrAdd(name, n => Task.Run(() => Load(n, M2Effects.Read)));
         return task.IsCompleted ? task.Result : null;
     }
 

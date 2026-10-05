@@ -102,6 +102,99 @@ public static class Shaders
         }
         """;
 
+    /// <summary>Animated M2 scenes (glue screens): texture coordinates go through a UV animation matrix.</summary>
+    public const string SceneVertex = """
+        #version 300 es
+        precision highp float;
+        layout (location = 0) in vec3 aPosition;
+        layout (location = 1) in vec3 aNormal;
+        layout (location = 2) in vec2 aUv;
+        layout (location = 3) in vec4 aColor;
+
+        uniform mat4 uModel;
+        uniform mat4 uView;
+        uniform mat4 uProjection;
+        uniform mat4 uTexMatrix;
+
+        out vec3 vNormal;
+        out vec2 vUv;
+        out vec4 vColor;
+        out vec3 vWorld;
+        out float vViewDistance;
+
+        void main()
+        {
+            vec4 world = uModel * vec4(aPosition, 1.0);
+            vec4 view = uView * world;
+            vNormal = mat3(uModel) * aNormal;
+            vUv = (uTexMatrix * vec4(aUv, 0.0, 1.0)).xy;
+            vColor = aColor;
+            vWorld = world.xyz;
+            vViewDistance = length(view.xyz);
+            gl_Position = uProjection * view;
+        }
+        """;
+
+    /// <summary>
+    /// Texture * vertex color * batch color, lit by an ambient term and up to four model lights (xyz position,
+    /// w 0 = directional from that position, 1 = point with range start/end), with linear fog from uFog.x to uFog.y.
+    /// </summary>
+    public const string SceneFragment = """
+        #version 300 es
+        precision highp float;
+        precision mediump sampler2D;
+        in vec3 vNormal;
+        in vec2 vUv;
+        in vec4 vColor;
+        in vec3 vWorld;
+        in float vViewDistance;
+
+        uniform sampler2D uTexture;
+        uniform vec4 uColor;
+        uniform float uAlphaTest;
+        uniform float uUnlit;
+        uniform vec3 uAmbient;
+        uniform int uLightCount;
+        uniform vec4 uLightPosition[4];
+        uniform vec3 uLightColor[4];
+        uniform vec2 uLightRange[4];
+        uniform vec3 uFogColor;
+        uniform vec2 uFog;
+
+        out vec4 FragColor;
+
+        void main()
+        {
+            vec4 texel = texture(uTexture, vUv) * vColor * uColor;
+            if (texel.a < uAlphaTest)
+                discard;
+            vec3 color = texel.rgb;
+            if (uUnlit < 0.5)
+            {
+                vec3 normal = normalize(gl_FrontFacing ? vNormal : -vNormal);
+                vec3 light = uAmbient;
+                for (int i = 0; i < 4; i++)
+                {
+                    if (i >= uLightCount)
+                        break;
+                    vec3 toLight = uLightPosition[i].w < 0.5 ? normalize(uLightPosition[i].xyz) : uLightPosition[i].xyz - vWorld;
+                    float attenuation = 1.0;
+                    if (uLightPosition[i].w >= 0.5)
+                    {
+                        float distance = length(toLight);
+                        toLight /= max(distance, 0.0001);
+                        attenuation = 1.0 - smoothstep(uLightRange[i].x, max(uLightRange[i].y, uLightRange[i].x + 0.001), distance);
+                    }
+                    light += uLightColor[i] * max(dot(normal, toLight), 0.0) * attenuation;
+                }
+                color *= clamp(light, 0.0, 2.0);
+            }
+            if (uFog.y > uFog.x)
+                color = mix(color, uFogColor, clamp((vViewDistance - uFog.x) / (uFog.y - uFog.x), 0.0, 1.0));
+            FragColor = vec4(clamp(color, 0.0, 1.0), texel.a);
+        }
+        """;
+
     /// <summary>Terrain splatting: up to four tiled layers blended by an RGB alpha map.</summary>
     public const string TerrainFragment = FragmentCommon + """
 

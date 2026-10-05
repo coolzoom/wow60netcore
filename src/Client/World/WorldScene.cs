@@ -281,7 +281,7 @@ public sealed class WorldScene : IHeightField, IDisposable
             modelShader.Set("uModel", instance.Transform);
             foreach (var batch in model.Data.Batches)
             {
-                if (batch.Blend is BlendMode.Alpha or BlendMode.Additive)
+                if (batch.IsTransparent)
                 {
                     _transparent.Add((model, batch, instance.Transform));
                     continue;
@@ -291,12 +291,11 @@ public sealed class WorldScene : IHeightField, IDisposable
             }
         }
 
-        _gl.Enable(EnableCap.Blend);
         _gl.DepthMask(false);
         modelShader.Set("uAlphaTest", 0.01f);
         foreach (var (model, batch, transform) in _transparent)
         {
-            _gl.BlendFunc(BlendingFactor.SrcAlpha, batch.Blend == BlendMode.Additive ? BlendingFactor.One : BlendingFactor.OneMinusSrcAlpha);
+            BlendStates.Apply(_gl, batch.Blend);
             modelShader.Set("uModel", transform);
             DrawBatch(model, batch);
         }
@@ -325,17 +324,13 @@ public sealed class WorldScene : IHeightField, IDisposable
         foreach (var pass in new[] { false, true })
         {
             if (pass)
-            {
-                _gl.Enable(EnableCap.Blend);
                 _gl.DepthMask(false);
-            }
             foreach (var batch in gpu.Data.Batches)
             {
-                var transparent = batch.Blend is BlendMode.Alpha or BlendMode.Additive;
-                if (transparent != pass || showGeoset?.Invoke(batch.Geoset) == false)
+                if (batch.IsTransparent != pass || showGeoset?.Invoke(batch.Geoset) == false)
                     continue;
                 if (pass)
-                    _gl.BlendFunc(BlendingFactor.SrcAlpha, batch.Blend == BlendMode.Additive ? BlendingFactor.One : BlendingFactor.OneMinusSrcAlpha);
+                    BlendStates.Apply(_gl, batch.Blend);
                 modelShader.Set("uAlphaTest", pass ? 0.01f : batch.Blend == BlendMode.AlphaKey ? 0.5f : -1f);
                 var texture = batch.Texture is { } name ? _assets.Texture(name) : batch.TextureType != 0 ? skin?.Invoke(batch.TextureType) : null;
                 (texture ?? _assets.Fallback).Bind(0);

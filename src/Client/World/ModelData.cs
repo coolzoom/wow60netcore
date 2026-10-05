@@ -6,7 +6,11 @@ using Formats.Terrain;
 
 namespace Client.World;
 
-public sealed record ModelBatchData(int IndexStart, int IndexCount, string? Texture, BlendMode Blend, int TextureType = 0, int Geoset = 0);
+public sealed record ModelBatchData(int IndexStart, int IndexCount, string? Texture, BlendMode Blend, int TextureType = 0, int Geoset = 0,
+    int Color = -1, int Transparency = -1, int UvAnimation = -1, RenderFlags Flags = RenderFlags.None, int PriorityPlane = 0)
+{
+    public bool IsTransparent => Blend >= BlendMode.Alpha;
+}
 
 /// <summary>Render-ready vertex/index buffers for an M2 or WMO, built off the main thread.</summary>
 public sealed class ModelData
@@ -27,7 +31,8 @@ public sealed class ModelData
         for (var i = 0; i < model.Positions.Length; i++)
             Write(vertices, i, model.Positions[i], model.Normals[i], model.TexCoords[i], Vector4.One);
 
-        var batches = model.Batches.Select(b => new ModelBatchData(b.IndexStart, b.IndexCount, b.Texture, b.Blend, b.TextureType, b.Geoset)).ToList();
+        var batches = model.Batches.Select(b => new ModelBatchData(b.IndexStart, b.IndexCount, b.Texture, b.Blend, b.TextureType, b.Geoset,
+            b.Color, b.Transparency, b.UvAnimation, b.Flags, b.PriorityPlane)).ToList();
         var data = Build(vertices, model.Indices.Select(i => (uint)i).ToArray(), batches, model.Positions);
         var attachments = new Dictionary<int, (int, Vector3)>();
         foreach (var a in model.Attachments)

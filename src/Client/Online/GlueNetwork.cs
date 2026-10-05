@@ -42,6 +42,15 @@ public sealed class GlueNetwork : IDisposable
     /// <summary>Enter the world with the first character as soon as the list arrives (scripted test runs).</summary>
     public bool AutoEnterWorld { get; set; }
 
+    /// <summary>The character being created, as the create screen's scene shows it.</summary>
+    public Appearance CreateLook => _customizer.Look;
+
+    /// <summary>The character highlighted on the select screen, with what it wears.</summary>
+    public Appearance? SelectedLook => _session.Characters.ElementAtOrDefault(_selected - 1) is { } c
+        ? new Appearance(c.Race, c.Gender, c.Skin, c.Face, c.HairStyle, c.HairColor, c.FacialHair, null,
+            [.. c.Equipment.Take(19).Select(e => (int)e.DisplayId)])
+        : null;
+
     /// <summary>The selected character entered the world.</summary>
     public event Action<WorldEntry>? EnteredWorld
     {
