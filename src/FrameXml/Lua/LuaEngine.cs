@@ -107,7 +107,8 @@ public sealed class LuaEngine
     public LuaEngine(UiLog log)
     {
         _log = log;
-        Script = new Script(CoreModules.Preset_Complete);
+        // WoW has no io library, and MoonSharp's opens the console's stdin, which throws on Android.
+        Script = new Script(CoreModules.Preset_Complete & ~CoreModules.IO);
         Script.DoString(Prelude, null, "compat.lua");
         Globals["seterrorhandler"] = DynValue.NewCallback((_, args) =>
         {

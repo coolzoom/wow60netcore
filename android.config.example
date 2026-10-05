@@ -1,0 +1,9 @@
+# Test server and account for android.sh. Copy to android.config (ignored by git) and fill in:
+#   cp android.config.example android.config
+# TEST_REALMLIST / TEST_LOGIN environment variables override these.
+
+# Logon server, "host" or "host:port"
+REALMLIST="127.0.0.1"
+
+# Log in right away as "account:password"; leave empty to type it on the device
+LOGIN=""

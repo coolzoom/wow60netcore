@@ -1,6 +1,8 @@
 bin/
 obj/
 imgui.ini
+# Local test server and account for android.sh (template: android.config.example)
+android.config
 
 # Android toolchain installed by android.sh (SDK also holds the JDK, private .NET, emulator AVD and cimgui sources)
 android-sdk/

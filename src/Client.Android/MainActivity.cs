@@ -11,7 +11,8 @@ namespace Client;
 /// Android entry point: SDL hosts an OpenGL ES 3.0 surface and runs the same games as the desktop client.
 /// Game data goes in the app's external files directory: /sdcard/Android/data/org.netcoreclient.wow/files/Data/*.MPQ
 /// (android.sh 4 pushes it). Intent extras: mode = glue (default: the full client, login to world) | world | procedural,
-/// map = map directory for world mode, realmlist = logon server host[:port] for glue mode (otherwise realmlist.wtf).
+/// map = map directory for world mode, realmlist = logon server host[:port] for glue mode (otherwise realmlist.wtf),
+/// login = "account:password" to log in with right away in glue mode.
 /// </summary>
 [Activity(Name = "org.netcoreclient.wow.MainActivity", Label = "WoW NetCore", MainLauncher = true, Exported = true,
     Theme = "@android:style/Theme.NoTitleBar.Fullscreen",

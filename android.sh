@@ -11,9 +11,13 @@
 #   WOW_DATA=<dir>        game Data directory (default ../Data), pushed to the device when testing
 #   SKIP_DATA=1           don't push game data when testing (the app then starts the procedural scene)
 #   TEST_MODE=glue        launch mode when testing: glue (full client: login screens to the world) | world | procedural
-#   TEST_REALMLIST=127.0.0.1   logon server for glue mode, also written to the device's realmlist.wtf
+#   TEST_REALMLIST=host[:port]       logon server for glue mode, also written to the device's realmlist.wtf
+#                                    (default: REALMLIST in android.config, else 127.0.0.1)
+#   TEST_LOGIN=account:password      log in with this account right away in glue mode (empty: type it on the device)
+#                                    (default: LOGIN in android.config)
 #   TEST_PORTS="3724 8085"     server ports forwarded from the device to this machine with adb reverse, so
-#                              127.0.0.1 on the device reaches the realmd/mangosd running here (empty: no forwarding)
+#                              127.0.0.1 on the device reaches the realmd/mangosd running here
+#                              (default: only when TEST_REALMLIST is 127.0.0.1/localhost; empty: no forwarding)
 #   TEST_SECONDS=45       seconds to wait after launch before the screenshot
 #   ANDROID_SERIAL=<serial>    device to test on when several are connected (see adb devices)
 #   ANDROID_KEYSTORE / ANDROID_KEY_ALIAS / ANDROID_KEY_PASS   your own signing key for packaging (default: debug key)
@@ -246,7 +250,8 @@ step_build() {
     info "Building the desktop client and tests (checks the shared code)"
     "$DOTNET" build "$ROOT/NetCoreClient.slnx" -c Debug -v quiet -nologo
     info "Building the Android project (Debug)"
-    "$DOTNET" build "$PROJECT" -c Debug -v quiet -nologo "${PROPS[@]}"
+    # Embedded assemblies make the Debug APK installable on its own (no Fast Deployment), with full exception messages.
+    "$DOTNET" build "$PROJECT" -c Debug -v quiet -nologo "${PROPS[@]}" -p:EmbedAssembliesIntoApk=true
     info "Build complete: $(find "$ROOT/src/Client.Android/bin/Debug" -name '*-Signed.apk' | head -1)"
 }
 
@@ -352,19 +357,28 @@ push_data() {
     info "Game data is on the device at $REMOTE_FILES/Data"
 }
 
-# The full client logs in to TEST_REALMLIST. adb reverse makes 127.0.0.1 on the device reach this machine's
-# realmd/mangosd, which also covers the world server address realmd hands out when it is 127.0.0.1.
+# Server and account come from android.config (copy android.config.example; it is in .gitignore).
+# TEST_REALMLIST / TEST_LOGIN in the environment override it.
+REALMLIST="" LOGIN=""
+[ ! -f "$ROOT/android.config" ] || eval "$(tr -d '\r' <"$ROOT/android.config")"
+REALMLIST="${TEST_REALMLIST:-${REALMLIST:-127.0.0.1}}"
+LOGIN="${TEST_LOGIN-$LOGIN}"
+
+# The full client logs in to REALMLIST. For a server on this machine, adb reverse makes 127.0.0.1 on the device
+# reach its realmd/mangosd, which also covers the world server address realmd hands out when it is 127.0.0.1.
 # realmlist.wtf next to Data/ lets the client find the server when started from the launcher too.
 setup_server() {
-    local realmlist="${TEST_REALMLIST:-127.0.0.1}" port
-    for port in ${TEST_PORTS-3724 8085}; do
+    local ports="" port
+    case "$REALMLIST" in 127.0.0.1*|localhost*) ports="3724 8085" ;; esac
+    ports="${TEST_PORTS-$ports}"
+    for port in $ports; do
         adb reverse "tcp:$port" "tcp:$port" >/dev/null || warn "adb reverse tcp:$port failed"
     done
     mkdir -p "$DIST"
-    printf 'set realmlist %s\r\n' "$realmlist" >"$DIST/realmlist.wtf"
+    printf 'set realmlist %s\r\n' "$REALMLIST" >"$DIST/realmlist.wtf"
     adb shell mkdir -p "$REMOTE_FILES"
     adb push "$DIST/realmlist.wtf" "$REMOTE_FILES/realmlist.wtf" >/dev/null
-    info "Logon server: $realmlist (forwarded ports: ${TEST_PORTS-3724 8085})"
+    info "Logon server: $REALMLIST (forwarded ports: ${ports:-none}${LOGIN:+, auto login as ${LOGIN%%:*}})"
 }
 
 step_test() {
@@ -387,7 +401,8 @@ step_test() {
     local mode="${TEST_MODE:-glue}" seconds="${TEST_SECONDS:-45}" extras=()
     if [ "$mode" = glue ]; then
         setup_server
-        extras=(--es realmlist "${TEST_REALMLIST:-127.0.0.1}")
+        extras=(--es realmlist "$REALMLIST")
+        [ -z "$LOGIN" ] || extras+=(--es login "$LOGIN")
     fi
     info "Launching the app (mode=${mode}), waiting $seconds seconds"
     adb shell am force-stop "$APP_ID"
