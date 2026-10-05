@@ -687,7 +687,7 @@ public sealed partial class GameApi
         Fn("GetSpellTabInfo", a => a.Int(0) == 1
             ? Tuple(S(_text["GENERAL"]), S(@"Interface\Icons\INV_Misc_Book_09"), N(0), N(Book().Count))
             : DynValue.Nil);
-        Fn("GetSpellName", a => BookSpell(a) is { } s ? Tuple(S(s.Name), S(s.Passive ? (s.Rank.Length > 0 ? s.Rank + " " : "") + _text["PASSIVE"] : s.Rank)) : DynValue.Nil);
+        Fn("GetSpellName", a => BookSpell(a) is { } s ? Tuple(S(s.Name), S(s.Passive ? (s.Rank.Length > 0 ? s.Rank + " " : "") + _text["SPELL_PASSIVE"] : s.Rank)) : DynValue.Nil);
         Fn("GetSpellTexture", a => S(BookSpell(a)?.Icon));
         Fn("GetSpellCooldown", a =>
         {

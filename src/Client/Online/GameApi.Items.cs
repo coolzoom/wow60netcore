@@ -410,7 +410,7 @@ public sealed partial class GameApi
         t.AddLine(unit.Name ?? "", null, color, White);
         var level = unit.Level > 0 ? unit.Level.ToString() : "??";
         if (unit.Type == ObjectType.Player)
-            t.AddLine(_text.Format("TOOLTIP_UNIT_LEVEL_RACE_CLASS", level, _data.Race(unit.Race)?.Name ?? "", _data.Class(unit.Class)?.Name ?? ""), null, White, White);
+            t.AddLine(_text.Format("TOOLTIP_UNIT_LEVEL_CLASS", level, $"{_data.Race(unit.Race)?.Name} {_data.Class(unit.Class)?.Name}".Trim()), null, White, White);
         else
             t.AddLine(_text.Format("TOOLTIP_UNIT_LEVEL", level), null, White, White);
         if (unit.IsDead)
@@ -481,7 +481,7 @@ public sealed partial class GameApi
         if (item.Description.Length > 0)
             t.AddLine($"“{item.Description}”", null, Gold, White, wrap: true);
         if (item.SellPrice > 0)
-            t.AddLine($"{_text["SELL_PRICE"]}：{Money(item.SellPrice)}", null, White, White);
+            t.AddLine($"{_text["SALE_PRICE_COLON"]}{Money(item.SellPrice)}", null, White, White);
     }
 
     // ---- Widgets the engine drives ---------------------------------------------------------------------------
