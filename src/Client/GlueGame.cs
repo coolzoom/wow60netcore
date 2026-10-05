@@ -31,6 +31,8 @@ public sealed class GlueGame(string dataDirectory, bool looseFiles, bool acceptA
     private GlueNetwork? _network;
     private AssetCache _assets = null!;
     private GlueScene _scene = null!;
+    /// <summary>Set once the server put the character in the world: the map to load and its loading picture.</summary>
+    private (string Map, string? Image, bool Shown)? _entering;
 
     public UiScreen Ui => _ui;
     /// <summary>Set to log in to a server; without it the screens run offline.</summary>
@@ -146,11 +148,15 @@ public sealed class GlueGame(string dataDirectory, bool looseFiles, bool acceptA
             _ui.Char(c.ToString());
     }
 
+    /// <summary>
+    /// The map's loading screen goes up as soon as the server puts the character in the world; the world screen,
+    /// whose interface takes a moment to load, takes over once that picture has been shown.
+    /// </summary>
     private void OnEnteredWorld(Net.WorldEntry entry)
     {
         var online = Online!;
         if (online.Data(_files).Map((int)entry.Map) is { } map)
-            SwitchTo(online.World(map.Directory));
+            _entering = (map.Directory, new LoadingScreen(_files).ImageFor(map.Id), false);
         else
         {
             _ui.FireEvent("OPEN_STATUS_DIALOG", "OKAY", $"Map {entry.Map} is not in Map.dbc");
@@ -176,6 +182,11 @@ public sealed class GlueGame(string dataDirectory, bool looseFiles, bool acceptA
 
     protected override void OnUpdate(float dt)
     {
+        if (_entering is { Shown: true } entering)
+        {
+            SwitchTo(Online!.World(entering.Map));
+            return;
+        }
         Online?.Session.Poll();
         _ui.Update(dt);
     }
@@ -188,6 +199,11 @@ public sealed class GlueGame(string dataDirectory, bool looseFiles, bool acceptA
         _scene.Render(new Vector2(Window.Size.X, Window.Size.Y), dt);
         _imgui.Update(dt);
         _renderer.Draw(new Vector2(Window.Size.X, Window.Size.Y), dt);
+        if (_entering is { } entering)
+        {
+            LoadingScreen.Draw(_assets, entering.Image, new Vector2(Window.Size.X, Window.Size.Y), 0);
+            _entering = entering with { Shown = entering.Image is null || _assets.IsTextureSettled(entering.Image) };
+        }
         _imgui.Render();
     }
 

@@ -41,10 +41,15 @@ public sealed class CharacterModels(ClientData data, AssetCache assets)
     {
         if (look.BakedSkin is { } baked)
             return assets.Texture(baked);
-        var key = $"@body:{look.Race}:{look.Sex}:{look.Skin}:{look.Face}:{look.HairStyle}:{look.HairColor}:{look.FacialHair}:" +
-                  string.Join(",", PaintOrder.Select(s => Item(look, s)?.Id ?? 0));
-        return assets.Texture(key, () => Compose(look));
+        return assets.Texture(BodyKey(look), () => Compose(look));
     }
+
+    /// <summary>True once <see cref="Body"/> has its texture on the GPU (or knows it cannot make one).</summary>
+    public bool IsBodySettled(Appearance look) => assets.IsTextureSettled(look.BakedSkin ?? BodyKey(look));
+
+    private string BodyKey(Appearance look) =>
+        $"@body:{look.Race}:{look.Sex}:{look.Skin}:{look.Face}:{look.HairStyle}:{look.HairColor}:{look.FacialHair}:" +
+        string.Join(",", PaintOrder.Select(s => Item(look, s)?.Id ?? 0));
 
     public string? HairTexture(Appearance look) =>
         data.SectionTexture(look.Race, look.Sex, ClientData.SectionHair, look.HairStyle, look.HairColor) is { Length: > 0 } hair ? hair : null;

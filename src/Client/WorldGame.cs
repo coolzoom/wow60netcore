@@ -46,6 +46,20 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
     private LoadingScreen? _loadingScreens;
     private string? _loadingImage;
     private bool _loading;
+    private float _loadSeconds;
+    private float _loadShown;
+    private float _objectsQuietFor;
+    private int _objectCount = -1;
+
+    /// <summary>The bar takes at least this long to fill, so the loading screen never just flickers.</summary>
+    private const float MinLoadSeconds = 1.5f;
+    /// <summary>Give up waiting for stragglers (a model that never resolves) after this long.</summary>
+    private const float MaxLoadSeconds = 30f;
+    /// <summary>The server's initial object stream counts as done once no new object arrived for this long.</summary>
+    private const float ObjectsQuietSeconds = 0.75f;
+    /// <summary>Objects this close to the player are on screen, fully dressed, before the loading screen goes.</summary>
+    private const float PreloadRadius = 120f;
+    private const int LoadingUploadsPerFrame = 1024;
 
     public IReadOnlyList<MapEntry> Maps { get; private set; } = [];
     public WorldScene? Scene => _scene;
@@ -82,6 +96,11 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
         Maps = MapDbc.Read(_files.Read("DBFilesClient\\Map.dbc"))
             .Where(m => _files.Exists(WorldScene.WdtPath(m.Directory)))
             .ToList();
+        var map = Maps.FirstOrDefault(m => m.Directory.Equals(mapDirectory, StringComparison.OrdinalIgnoreCase)) ?? Maps[0];
+        // Decode the loading picture while the interface loads, so the first frame already shows it.
+        _loadingScreens = new LoadingScreen(_files);
+        if (_loadingScreens.ImageFor(map.Id) is { } picture)
+            _assets.Texture(picture);
 
         _terrainShader = new Shader(Gl, Shaders.LitVertex, Shaders.TerrainFragment);
         _terrainShader.Use();
@@ -119,9 +138,6 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
             _imgui = new ImGuiController(Gl, Window, InputContext, UiFont.Create(_files, allChinese: false),
                 () => ImGui.GetIO().ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard, Options.UiScale, softKeyboard: Options.TouchControls);
         _ui = new WorldUi(this, browseFilter);
-        _loadingScreens = new LoadingScreen(_files);
-
-        var map = Maps.FirstOrDefault(m => m.Directory.Equals(mapDirectory, StringComparison.OrdinalIgnoreCase)) ?? Maps[0];
         LoadMap(map, spawnWorld is { } world ? WorldSpace.FromWorld(world) : null);
 
         if (Online is { } online)
@@ -193,6 +209,8 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
         _player = new CharacterController(_scene, position);
         _snapToGround = true;
         _loading = true;
+        (_loadSeconds, _loadShown, _objectsQuietFor, _objectCount) = (0, 0, 0, -1);
+        _assets.UploadsPerFrame = LoadingUploadsPerFrame;
         _loadingImage = _loadingScreens?.ImageFor(map.Id);
         _camera.MinHeightAt = (x, z) =>
             _scene.TryGetHeight(new Vector3(x, _player.Position.Y + 2f, z), out var h) ? h : float.MinValue;
@@ -237,8 +255,15 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
             {
                 _player.Teleport(_player.Position);
                 _snapToGround = false;
-                _loading = false;
             }
+            _camera.Target = _player.Position + new Vector3(0, 1.6f, 0);
+            if (_loading)
+                UpdateLoading(dt);
+            return;
+        }
+        if (_loading)
+        {
+            UpdateLoading(dt);
             _camera.Target = _player.Position + new Vector3(0, 1.6f, 0);
             return;
         }
@@ -281,6 +306,46 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
         _camera.Target = _player.Position + new Vector3(0, 1.6f, 0);
     }
 
+    /// <summary>
+    /// Advances the loading screen. Like the client, it stays up until the world is ready to be seen: terrain and
+    /// buildings around the player (half the bar), the server's object stream, and every nearby object's model,
+    /// skeleton, skins and gear on the GPU. The shown bar only moves forward and fills in at least
+    /// <see cref="MinLoadSeconds"/>.
+    /// </summary>
+    private void UpdateLoading(float dt)
+    {
+        // The first frame comes after the interface loaded synchronously; that pause must not jump the bar ahead.
+        dt = Math.Min(dt, 0.1f);
+        _loadSeconds += dt;
+        var stats = _scene!.Stats;
+        var terrain = _snapToGround ? stats.Tiles / (float)Math.Max(1, stats.Tiles + stats.PendingTiles) * 0.95f : 1f;
+
+        var objects = 1f;
+        var streamed = true;
+        if (_online is { } online)
+        {
+            var (count, hasPlayer) = online.Received;
+            _objectsQuietFor = count == _objectCount ? _objectsQuietFor + dt : 0;
+            _objectCount = count;
+            streamed = hasPlayer && _objectsQuietFor >= ObjectsQuietSeconds;
+            var (ready, total) = online.Preload(_player.Position, PreloadRadius);
+            objects = (streamed ? 1f : 0.5f) * (total == 0 ? 1f : ready / (float)total);
+        }
+        var idle = _assets.InFlight == 0;
+        var target = terrain * 0.5f + objects * 0.4f + (idle ? 0.1f : 0f);
+        var done = !_snapToGround && streamed && objects >= 1f && idle;
+        if (done || _loadSeconds >= MaxLoadSeconds)
+            target = 1f;
+        _loadShown = Math.Min(Math.Max(_loadShown, target), _loadShown + dt / MinLoadSeconds);
+        if (_loadShown >= 1f && (done || _loadSeconds >= MaxLoadSeconds))
+        {
+            Console.WriteLine($"World loaded in {_loadSeconds:F1} s: {stats.Tiles} tiles, {_objectCount} objects" +
+                              (done ? "" : " (gave up waiting on some assets)"));
+            _loading = false;
+            _assets.UploadsPerFrame = AssetCache.DefaultUploadsPerFrame;
+        }
+    }
+
     protected override void OnRender(float dt)
     {
         _assets.BeginFrame();
@@ -318,11 +383,7 @@ public sealed class WorldGame(string dataDirectory, string mapDirectory, Vector3
         else
             _ui.Draw(dt);
         if (_loading)
-        {
-            var stats = _scene.Stats;
-            var progress = stats.Tiles / (float)Math.Max(1, stats.Tiles + stats.PendingTiles) * 0.9f + (_assets.PendingCount == 0 ? 0.1f : 0f);
-            LoadingScreen.Draw(_assets, _loadingImage, new Vector2(Window.Size.X, Window.Size.Y), progress);
-        }
+            LoadingScreen.Draw(_assets, _loadingImage, new Vector2(Window.Size.X, Window.Size.Y), _loadShown);
         _imgui.Render();
     }
 

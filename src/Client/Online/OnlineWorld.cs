@@ -285,6 +285,65 @@ public sealed class OnlineWorld : IDisposable
         }
     }
 
+    /// <summary>Objects the server has reported so far, and whether the player's own object is among them.</summary>
+    public (int Count, bool HasPlayer) Received => (_session.Objects.All.Count(), _session.Player is not null);
+
+    /// <summary>
+    /// For the loading screen: requests everything the objects within <paramref name="radius"/> of
+    /// <paramref name="focus"/> need to be drawn (model, skeleton, skins, gear) and counts how many have it all.
+    /// </summary>
+    public (int Ready, int Total) Preload(Vector3 focus, float radius)
+    {
+        var (ready, total) = (0, 0);
+        foreach (var obj in _session.Objects.All)
+        {
+            var position = obj.Guid == _session.PlayerGuid ? focus : WorldSpace.FromWorld(obj.Position);
+            if (Vector3.Distance(position, focus) > radius || LookOf(obj) is not { } look)
+                continue;
+            total++;
+            if (IsLoaded(look))
+                ready++;
+        }
+        return (ready, total);
+    }
+
+    private bool IsLoaded(UnitLook look)
+    {
+        var assets = _game.Assets;
+        var loaded = Model(look.Model) & assets.TryGetSkeleton(look.Model, out _);
+        if (look.Character is { } character)
+        {
+            _characters.Body(character);
+            loaded &= _characters.IsBodySettled(character) & Texture(_characters.HairTexture(character)) &
+                      Texture(_characters.CapeTexture(character));
+        }
+        else
+            foreach (var skin in look.Display.Skins)
+                loaded &= Texture(skin);
+        if (look.Items is not null)
+            foreach (var item in _characters.Attachments(look.Character ?? new Appearance(0, 0, 0, 0, 0, 0, 0, null, look.Items), false))
+                loaded &= Model(item.Model) & Texture(item.Texture);
+        return loaded;
+
+        bool Model(string name)
+        {
+            if (assets.Model(name) is { } model)
+                foreach (var batch in model.Data.Batches)
+                    if (batch.Texture is { } texture)
+                        assets.Texture(texture);
+            return assets.IsModelSettled(name) &&
+                   (assets.Model(name) is not { } gpu || gpu.Data.Batches.All(b => b.Texture is not { } t || assets.IsTextureSettled(t)));
+        }
+
+        bool Texture(string? name)
+        {
+            if (name is null)
+                return true;
+            assets.Texture(name);
+            return assets.IsTextureSettled(name);
+        }
+    }
+
     /// <summary>What to draw for an object; <paramref name="Items"/> are the display ids of its 19 equipment slots.</summary>
     private sealed record UnitLook(string Model, float Scale, DisplayInfo Display, Appearance? Character, int[]? Items = null);
 

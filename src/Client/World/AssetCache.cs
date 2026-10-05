@@ -22,7 +22,7 @@ public sealed class GpuModel(Mesh mesh, ModelData data) : IDisposable
 /// </summary>
 public sealed class AssetCache : IDisposable
 {
-    private const int UploadsPerFrame = 48;
+    public const int DefaultUploadsPerFrame = 48;
 
     private readonly GL _gl;
     private readonly MpqFileSystem _files;
@@ -35,7 +35,17 @@ public sealed class AssetCache : IDisposable
     private int _uploadBudget;
 
     public Texture Fallback { get; }
+    /// <summary>GPU uploads allowed per frame; raised behind the loading screen, where frame time does not matter.</summary>
+    public int UploadsPerFrame { get; set; } = DefaultUploadsPerFrame;
     public int PendingCount => _imageTasks.Count(t => !t.Value.IsCompleted) + _modelTasks.Count(t => !t.Value.IsCompleted);
+    /// <summary>Decodes still running on the thread pool (textures, models, skeletons).</summary>
+    public int InFlight => PendingCount + _skeletons.Count(t => !t.Value.IsCompleted);
+
+    /// <summary>True once a texture (or composited texture key) is on the GPU or known to be missing.</summary>
+    public bool IsTextureSettled(string key) => _textures.ContainsKey(key);
+
+    /// <summary>True once a model is on the GPU or known to be missing.</summary>
+    public bool IsModelSettled(string name) => _models.ContainsKey(name);
     public int TextureCount => _textures.Count;
     public int ModelCount => _models.Count;
     public long Bytes { get; private set; }
